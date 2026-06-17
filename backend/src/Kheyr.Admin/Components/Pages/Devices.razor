@@ -1,0 +1,51 @@
+@page "/devices"
+@using Kheyr.Infrastructure.Data
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+@attribute [Authorize(Roles = "Admin")]
+@inject KheyrDbContext Db
+@rendermode InteractiveServer
+
+<PageTitle>Devices</PageTitle>
+
+<h1>Devices & Sessions</h1>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-3"><div class="card p-3">Active devices: <strong>@_activeDevices</strong></div></div>
+    <div class="col-md-3"><div class="card p-3">Android: <strong>@_android</strong></div></div>
+    <div class="col-md-3"><div class="card p-3">Desktop: <strong>@_desktop</strong></div></div>
+    <div class="col-md-3"><div class="card p-3">Users: <strong>@_users</strong></div></div>
+</div>
+
+<table class="table table-sm">
+    <thead><tr><th>Name</th><th>Type</th><th>Platform</th><th>Last active</th><th>Revoked</th></tr></thead>
+    <tbody>
+    @foreach (var d in _devices)
+    {
+        <tr>
+            <td>@d.DeviceName</td>
+            <td>@d.DeviceType</td>
+            <td>@d.Platform</td>
+            <td>@d.LastActiveAt.ToString("u")</td>
+            <td>@(d.RevokedAt is null ? "no" : d.RevokedAt.Value.ToString("u"))</td>
+        </tr>
+    }
+    </tbody>
+</table>
+
+@code {
+    private int _activeDevices;
+    private int _android;
+    private int _desktop;
+    private int _users;
+    private List<Domain.Entities.Device> _devices = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _users = await Db.Users.CountAsync(x => x.DeletedAt == null);
+        _activeDevices = await Db.Devices.CountAsync(x => x.RevokedAt == null);
+        _android = await Db.Devices.CountAsync(x => x.RevokedAt == null && x.DeviceType == Domain.DeviceType.Android);
+        _desktop = await Db.Devices.CountAsync(x => x.RevokedAt == null && x.DeviceType == Domain.DeviceType.Desktop);
+        _devices = await Db.Devices.OrderByDescending(x => x.LastActiveAt).Take(100).ToListAsync();
+    }
+}

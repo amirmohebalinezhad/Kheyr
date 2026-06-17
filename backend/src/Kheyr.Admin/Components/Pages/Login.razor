@@ -1,0 +1,59 @@
+@page "/login"
+@using Kheyr.Admin.Services
+@using Microsoft.AspNetCore.Authentication
+@using Microsoft.AspNetCore.Authentication.Cookies
+@inject AdminAuthService Auth
+@inject NavigationManager Navigation
+@inject IHttpContextAccessor HttpContextAccessor
+@rendermode InteractiveServer
+
+<PageTitle>Login</PageTitle>
+
+<div class="row justify-content-center mt-5">
+    <div class="col-md-4">
+        <h1>Admin Login</h1>
+        <EditForm Model="_model" OnValidSubmit="LoginAsync">
+            <div class="mb-3">
+                <label>Username</label>
+                <InputText class="form-control" @bind-Value="_model.Username" />
+            </div>
+            <div class="mb-3">
+                <label>Password</label>
+                <InputText type="password" class="form-control" @bind-Value="_model.Password" />
+            </div>
+            @if (!string.IsNullOrEmpty(_error))
+            {
+                <div class="alert alert-danger">@_error</div>
+            }
+            <button class="btn btn-primary w-100" type="submit">Sign in</button>
+        </EditForm>
+        <p class="text-muted small mt-3">Default dev credentials: admin / admin</p>
+    </div>
+</div>
+
+@code {
+    private LoginModel _model = new();
+    private string? _error;
+
+    private async Task LoginAsync()
+    {
+        var user = await Auth.ValidateAsync(_model.Username, _model.Password, CancellationToken.None);
+        if (user is null)
+        {
+            _error = "Invalid username or password.";
+            return;
+        }
+
+        var http = HttpContextAccessor.HttpContext;
+        if (http is null) return;
+
+        await http.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, AdminAuthService.CreatePrincipal(user));
+        Navigation.NavigateTo("/", forceLoad: true);
+    }
+
+    private sealed class LoginModel
+    {
+        public string Username { get; set; } = "";
+        public string Password { get; set; } = "";
+    }
+}

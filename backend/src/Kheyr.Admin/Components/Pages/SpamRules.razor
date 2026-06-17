@@ -1,0 +1,134 @@
+@page "/spam-rules"
+@using System.Text.Json
+@using Kheyr.Domain.Entities
+@using Kheyr.Infrastructure.Data
+@using Kheyr.Infrastructure.Services
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+@attribute [Authorize(Roles = "Admin")]
+@inject KheyrDbContext Db
+@inject SpamRuleService SpamRuleService
+@rendermode InteractiveServer
+
+<PageTitle>Spam Rules</PageTitle>
+
+<h1>Global Spam Rules</h1>
+
+@if (_published is not null)
+{
+    <div class="alert alert-info">
+        Published version <strong>@_published.Version</strong> (threshold @_published.Threshold) —
+        @_ruleCount rules, updated @_published.CreatedAt.ToString("u")
+    </div>
+}
+
+<h2>Publish new version</h2>
+<EditForm Model="_draft" OnValidSubmit="PublishAsync">
+    <div class="mb-2">
+        <label>Version</label>
+        <InputNumber class="form-control" @bind-Value="_draft.Version" />
+    </div>
+    <div class="mb-2">
+        <label>Threshold</label>
+        <InputNumber class="form-control" @bind-Value="_draft.Threshold" />
+    </div>
+    <div class="mb-2">
+        <label>Rules JSON</label>
+        <InputTextArea class="form-control font-monospace" rows="12" @bind-Value="_draft.RulesJson" />
+    </div>
+    <div class="mb-2">
+        <label>Notes</label>
+        <InputText class="form-control" @bind-Value="_draft.Notes" />
+    </div>
+    <button class="btn btn-primary" type="submit">Publish</button>
+</EditForm>
+
+@if (!string.IsNullOrEmpty(_message))
+{
+    <div class="alert alert-secondary mt-3">@_message</div>
+}
+
+<h2 class="mt-4">Rollback</h2>
+<div class="d-flex gap-2">
+    <InputNumber class="form-control" style="max-width:120px" @bind-Value="_rollbackVersion" />
+    <button class="btn btn-outline-warning" @onclick="RollbackAsync">Rollback</button>
+</div>
+
+<h2 class="mt-4">History</h2>
+<table class="table table-sm">
+    <thead><tr><th>Version</th><th>Threshold</th><th>Published</th><th>Created</th><th>Notes</th></tr></thead>
+    <tbody>
+    @foreach (var v in _versions)
+    {
+        <tr class="@(v.IsPublished ? "table-success" : "")">
+            <td>@v.Version</td><td>@v.Threshold</td><td>@(v.IsPublished ? "yes" : "no")</td>
+            <td>@v.CreatedAt.ToString("u")</td><td>@v.Notes</td>
+        </tr>
+    }
+    </tbody>
+</table>
+
+@code {
+    private SpamRuleVersion? _published;
+    private List<SpamRuleVersion> _versions = [];
+    private int _ruleCount;
+    private string? _message;
+    private int _rollbackVersion = 1;
+    private PublishDraft _draft = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await ReloadAsync();
+        if (_published is not null)
+        {
+            _draft.Version = _published.Version + 1;
+            _draft.Threshold = _published.Threshold;
+            _draft.RulesJson = _published.RulesJson;
+        }
+    }
+
+    private async Task ReloadAsync()
+    {
+        _published = await SpamRuleService.GetLatestPublishedAsync(CancellationToken.None);
+        _versions = await Db.SpamRuleVersions.OrderByDescending(x => x.Version).Take(20).ToListAsync();
+        _ruleCount = _published is null ? 0 : SpamRuleService.ParseRules(_published.RulesJson).Count;
+    }
+
+    private async Task PublishAsync()
+    {
+        try
+        {
+            var rules = JsonSerializer.Deserialize<List<SpamRuleDto>>(_draft.RulesJson) ?? [];
+            await SpamRuleService.PublishAsync(_draft.Version, _draft.Threshold, rules, "admin", _draft.Notes, CancellationToken.None);
+            _message = $"Published version {_draft.Version}.";
+            await ReloadAsync();
+            _draft.Version = (_published?.Version ?? 0) + 1;
+        }
+        catch (Exception ex)
+        {
+            _message = ex.Message;
+        }
+    }
+
+    private async Task RollbackAsync()
+    {
+        try
+        {
+            await SpamRuleService.RollbackAsync(_rollbackVersion, CancellationToken.None);
+            _message = $"Rolled back to version {_rollbackVersion}.";
+            await ReloadAsync();
+        }
+        catch (Exception ex)
+        {
+            _message = ex.Message;
+        }
+    }
+
+    private sealed class PublishDraft
+    {
+        public int Version { get; set; } = 1;
+        public int Threshold { get; set; } = 70;
+        public string RulesJson { get; set; } = "[]";
+        public string? Notes { get; set; }
+    }
+}

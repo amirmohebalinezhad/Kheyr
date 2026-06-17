@@ -1,0 +1,51 @@
+@page "/feedback"
+@using Kheyr.Domain
+@using Kheyr.Infrastructure.Data
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+@attribute [Authorize(Roles = "Admin")]
+@inject KheyrDbContext Db
+@rendermode InteractiveServer
+
+<PageTitle>Spam Feedback</PageTitle>
+
+<h1>Spam Feedback Metrics</h1>
+
+<div class="row g-3 mb-4">
+    <div class="col-md-4"><div class="card p-3">Mark spam: <strong>@_spamCount</strong></div></div>
+    <div class="col-md-4"><div class="card p-3">Mark not spam: <strong>@_notSpamCount</strong></div></div>
+    <div class="col-md-4"><div class="card p-3">False positive rate: <strong>@_falsePositiveRate.ToString("P1")</strong></div></div>
+</div>
+
+<h2>Recent feedback</h2>
+<table class="table table-sm">
+    <thead><tr><th>When</th><th>Action</th><th>Score</th><th>Rule version</th><th>Sender hash</th></tr></thead>
+    <tbody>
+    @foreach (var item in _recent)
+    {
+        <tr>
+            <td>@item.CreatedAt.ToString("u")</td>
+            <td>@item.UserAction</td>
+            <td>@item.SpamScore</td>
+            <td>@item.RuleVersion</td>
+            <td class="font-monospace small">@item.SenderHash[..Math.Min(12, item.SenderHash.Length)]…</td>
+        </tr>
+    }
+    </tbody>
+</table>
+
+@code {
+    private int _spamCount;
+    private int _notSpamCount;
+    private double _falsePositiveRate;
+    private List<Domain.Entities.SpamFeedback> _recent = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _spamCount = await Db.SpamFeedback.CountAsync(x => x.UserAction == SpamFeedbackAction.Spam);
+        _notSpamCount = await Db.SpamFeedback.CountAsync(x => x.UserAction == SpamFeedbackAction.NotSpam);
+        var total = _spamCount + _notSpamCount;
+        _falsePositiveRate = total == 0 ? 0 : (double)_notSpamCount / total;
+        _recent = await Db.SpamFeedback.OrderByDescending(x => x.CreatedAt).Take(50).ToListAsync();
+    }
+}

@@ -1,0 +1,6 @@
+@Kheyr.Api_HostAddress = http://localhost:5138
+
+GET {{Kheyr.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
