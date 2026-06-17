@@ -130,6 +130,7 @@ Last updated: 2026-06-17
 - [x] Added conversation message UI model for bubble, timestamp, and status rendering.
 - [x] Implement encrypted local storage at rest using SQLCipher or Android encrypted file-backed stores.
 - [x] Added SMS composer state reducer for send validation, SIM selection, completion, and retryable failures.
+- [x] Added SMS import planner for batched existing-message backfill during onboarding.
 - [x] Added onboarding sync opt-in model for optional account creation during setup.
 - [x] Added permission denial state resolving limited-mode behavior for denied permissions.
 - [x] Added welcome screen copy for default SMS requirement explainer.
