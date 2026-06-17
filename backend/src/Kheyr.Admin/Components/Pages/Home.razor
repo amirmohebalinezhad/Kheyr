@@ -1,0 +1,35 @@
+﻿@page "/"
+@using Kheyr.Infrastructure.Services
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize(Roles = "Admin")]
+@inject MetricsService Metrics
+@rendermode InteractiveServer
+
+<PageTitle>Dashboard</PageTitle>
+
+<h1>System Health</h1>
+
+@if (_summary is null)
+{
+    <p>Loading...</p>
+}
+else
+{
+    <div class="row g-3">
+        <div class="col-md-3"><div class="card p-3"><div class="text-muted">Active users (7d)</div><div class="fs-3">@_summary.ActiveUsers</div></div></div>
+        <div class="col-md-3"><div class="card p-3"><div class="text-muted">Devices</div><div class="fs-3">@_summary.Devices</div></div></div>
+        <div class="col-md-3"><div class="card p-3"><div class="text-muted">Sync enabled</div><div class="fs-3">@_summary.SyncEnabledUsers</div></div></div>
+        <div class="col-md-3"><div class="card p-3"><div class="text-muted">Relay failures</div><div class="fs-3">@_summary.RelayFailed / @_summary.RelayTotal</div></div></div>
+        <div class="col-md-3"><div class="card p-3"><div class="text-muted">Mark spam</div><div class="fs-3">@_summary.FeedbackSpam</div></div></div>
+        <div class="col-md-3"><div class="card p-3"><div class="text-muted">Mark not spam</div><div class="fs-3">@_summary.FeedbackNotSpam</div></div></div>
+    </div>
+}
+
+@code {
+    private SystemHealthSummary? _summary;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _summary = await Metrics.GetHealthSummaryAsync(CancellationToken.None);
+    }
+}

@@ -1,0 +1,42 @@
+﻿<div class="top-row ps-3 navbar navbar-dark bg-dark">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="">Kheyr Admin</a>
+    </div>
+</div>
+
+<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
+
+<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
+    <nav class="nav flex-column">
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
+                <span class="bi bi-speedometer2" aria-hidden="true"></span> Dashboard
+            </NavLink>
+        </div>
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="spam-rules">
+                <span class="bi bi-shield-check" aria-hidden="true"></span> Spam Rules
+            </NavLink>
+        </div>
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="feedback">
+                <span class="bi bi-chat-left-text" aria-hidden="true"></span> Feedback
+            </NavLink>
+        </div>
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="devices">
+                <span class="bi bi-phone" aria-hidden="true"></span> Devices
+            </NavLink>
+        </div>
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="relay">
+                <span class="bi bi-send" aria-hidden="true"></span> SMS Relay
+            </NavLink>
+        </div>
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="login">
+                <span class="bi bi-box-arrow-right" aria-hidden="true"></span> Login
+            </NavLink>
+        </div>
+    </nav>
+</div>

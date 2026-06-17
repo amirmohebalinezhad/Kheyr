@@ -1,0 +1,50 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: kheyr
+      POSTGRES_PASSWORD: kheyr
+      POSTGRES_DB: kheyr
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Default: Host=postgres;Port=5432;Database=kheyr;Username=kheyr;Password=kheyr
+      Database__UseSqlite: "false"
+      Jwt__SigningKey: kheyr-docker-signing-key-change-in-production-32chars
+      Otp__DevelopmentMode: "true"
+      Otp__FixedCode: "123456"
+    ports:
+      - "8080:8080"
+    depends_on:
+      - postgres
+      - redis
+
+  admin:
+    build:
+      context: .
+      dockerfile: Dockerfile.admin
+    environment:
+      ASPNETCORE_URLS: http://+:8081
+      ConnectionStrings__Default: Host=postgres;Port=5432;Database=kheyr;Username=kheyr;Password=kheyr
+      Database__UseSqlite: "false"
+    ports:
+      - "8081:8081"
+    depends_on:
+      - postgres
+      - api
+
+volumes:
+  pgdata:

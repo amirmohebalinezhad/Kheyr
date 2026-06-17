@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Kheyr.Admin/Kheyr.Admin.csproj" />
+    <Project Path="src/Kheyr.Api/Kheyr.Api.csproj" />
+    <Project Path="src/Kheyr.Domain/Kheyr.Domain.csproj" />
+    <Project Path="src/Kheyr.Infrastructure/Kheyr.Infrastructure.csproj" />
+  </Folder>
+</Solution>

@@ -1,0 +1,49 @@
+@page "/relay"
+@using Kheyr.Domain
+@using Kheyr.Infrastructure.Data
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.EntityFrameworkCore
+@attribute [Authorize(Roles = "Admin")]
+@inject KheyrDbContext Db
+@rendermode InteractiveServer
+
+<PageTitle>SMS Relay</PageTitle>
+
+<h1>Desktop SMS Relay</h1>
+
+<div class="row g-3 mb-4">
+    @foreach (var group in _statusCounts)
+    {
+        <div class="col-md-2"><div class="card p-3">@group.Key: <strong>@group.Value</strong></div></div>
+    }
+</div>
+
+<table class="table table-sm">
+    <thead><tr><th>Created</th><th>Status</th><th>Desktop device</th><th>Expires</th><th>Failure</th></tr></thead>
+    <tbody>
+    @foreach (var r in _recent)
+    {
+        <tr>
+            <td>@r.CreatedAt.ToString("u")</td>
+            <td>@r.Status</td>
+            <td class="font-monospace small">@r.DesktopDeviceId.ToString()[..8]…</td>
+            <td>@r.ExpiresAt.ToString("u")</td>
+            <td>@r.FailureReason</td>
+        </tr>
+    }
+    </tbody>
+</table>
+
+@code {
+    private Dictionary<DesktopSmsRequestStatus, int> _statusCounts = [];
+    private List<Domain.Entities.DesktopSmsRequest> _recent = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _statusCounts = await Db.DesktopSmsRequests
+            .GroupBy(x => x.Status)
+            .Select(g => new { g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count);
+        _recent = await Db.DesktopSmsRequests.OrderByDescending(x => x.CreatedAt).Take(50).ToListAsync();
+    }
+}
