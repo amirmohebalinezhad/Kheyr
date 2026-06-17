@@ -130,6 +130,7 @@ Last updated: 2026-06-17
 - [x] Added conversation message UI model for bubble, timestamp, and status rendering.
 - [x] Implement encrypted local storage at rest using SQLCipher or Android encrypted file-backed stores.
 - [x] Added SMS composer state reducer for send validation, SIM selection, completion, and retryable failures.
+- [x] Added direct message settings model for global direct messaging enablement toggle.
 - [x] Added contact registration lookup for discovering registered app users by phone.
 - [x] Added desktop relay queue expiry policy for stale unsent relay requests.
 - [x] Added desktop relay request handler model for incoming desktop SMS send requests.
