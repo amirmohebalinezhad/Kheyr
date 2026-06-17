@@ -17,6 +17,12 @@ data class DeviceContact(
 )
 
 class ContactRepository(private val context: Context) {
+    @Volatile
+    private var cachedNameIndex: Map<String, String>? = null
+
+    fun invalidateCache() {
+        cachedNameIndex = null
+    }
     fun hasContactsPermission(): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
 
@@ -69,13 +75,20 @@ class ContactRepository(private val context: Context) {
 
     suspend fun enrichThreads(threads: List<SmsThread>): List<SmsThread> = withContext(Dispatchers.IO) {
         if (!hasContactsPermission() || threads.isEmpty()) return@withContext threads
-        val nameIndex = buildNameIndex()
+        val nameIndex = getNameIndex()
         val cache = mutableMapOf<String, String?>()
         threads.map { thread ->
             if (thread.displayName != thread.address && thread.displayName.isNotBlank()) return@map thread
             val resolved = resolveDisplayName(thread.address, nameIndex, cache)
             resolved?.let { thread.copy(displayName = it) } ?: thread
         }
+    }
+
+    private suspend fun getNameIndex(): Map<String, String> {
+        cachedNameIndex?.let { return it }
+        val built = buildNameIndex()
+        cachedNameIndex = built
+        return built
     }
 
     private fun buildNameIndex(): Map<String, String> {
@@ -98,7 +111,7 @@ class ContactRepository(private val context: Context) {
                 val number = cursor.getString(numberCol).orEmpty().trim()
                 if (number.isEmpty()) continue
                 index.putIfAbsent(number, name)
-                index.putIfAbsent(normalizePhone(number), name)
+                index.putIfAbsent(PhoneNumberNormalizer.normalize(number), name)
             }
         }
         return index
@@ -110,7 +123,7 @@ class ContactRepository(private val context: Context) {
         cache: MutableMap<String, String?>,
     ): String? = cache.getOrPut(address) {
         nameIndex[address]
-            ?: nameIndex[normalizePhone(address)]
+            ?: nameIndex[PhoneNumberNormalizer.normalize(address)]
             ?: lookupDisplayNameSync(address)
     }
 
@@ -127,5 +140,5 @@ class ContactRepository(private val context: Context) {
         }
     }
 
-    private fun normalizePhone(phone: String): String = phone.filter { it.isDigit() || it == '+' }
+    fun matchesAddress(first: String, second: String): Boolean = PhoneNumberNormalizer.matches(first, second)
 }

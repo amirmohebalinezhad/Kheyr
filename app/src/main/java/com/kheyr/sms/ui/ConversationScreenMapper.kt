@@ -1,6 +1,9 @@
 package com.kheyr.sms.ui
 
 import com.kheyr.sms.data.MessageDirection
+import com.kheyr.sms.data.MessageStatus
+import com.kheyr.sms.util.JalaliDateFormatter
+import com.kheyr.sms.util.OtpDetector
 import com.kheyr.sms.data.SmsMessage
 import com.kheyr.sms.data.SmsThread
 import com.kheyr.sms.telephony.SimCard
@@ -9,7 +12,9 @@ data class ConversationMessageRow(
     val id: Long,
     val body: String,
     val layout: ConversationBubbleLayout,
-    val status: RetryableSendUiModel,
+    val timeLabel: String,
+    val showRetry: Boolean,
+    val copyableCode: String?,
 )
 
 data class ConversationScreenModel(
@@ -40,6 +45,8 @@ class ConversationScreenMapper(
         id = message.id,
         body = message.body,
         layout = ConversationBubbleLayoutResolver.resolve(message.direction, message.body),
-        status = RetryableSendUiMapper.map(message.id, message.status),
+        timeLabel = JalaliDateFormatter.format(message.timestamp),
+        showRetry = message.direction == MessageDirection.Outgoing && message.status == MessageStatus.Failed,
+        copyableCode = OtpDetector.findCopyableCode(message.body),
     )
 }
