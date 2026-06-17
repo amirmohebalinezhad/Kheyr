@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Telephony
+import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -40,6 +41,7 @@ import com.kheyr.sms.data.SmsMessage
 import com.kheyr.sms.data.SmsRepository
 import com.kheyr.sms.data.SmsThread
 import com.kheyr.sms.domain.ThreadSorter
+import com.kheyr.sms.onboarding.DefaultSmsRoleChecker
 import com.kheyr.sms.onboarding.OnboardingGateState
 import com.kheyr.sms.onboarding.WelcomeScreenCopy
 import com.kheyr.sms.preferences.AppPreferences
@@ -59,6 +61,8 @@ import com.kheyr.sms.thread.ThreadBulkAction
 import com.kheyr.sms.thread.ThreadSearchMatcher
 import com.kheyr.sms.thread.SearchableThread
 import com.kheyr.sms.worker.KheyrWorkerScheduler
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.launch
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -98,7 +102,18 @@ fun KheyrAppShell() {
     LaunchedEffect(drawerOpen) {
         if (drawerOpen) drawerState.open() else drawerState.close()
     }
-    var isDefaultSms by remember { mutableStateOf(Telephony.Sms.getDefaultSmsPackage(context) == context.packageName) }
+    var isDefaultSms by remember { mutableStateOf(DefaultSmsRoleChecker.isDefaultSmsApp(context)) }
+    val activity = context as? ComponentActivity
+    DisposableEffect(activity) {
+        val lifecycle = activity?.lifecycle ?: return@DisposableEffect onDispose {}
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                isDefaultSms = DefaultSmsRoleChecker.isDefaultSmsApp(context)
+            }
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
+    }
     var sims by remember { mutableStateOf<List<SimCard>>(emptyList()) }
     var notificationSettings by remember { mutableStateOf(preferences.notificationSettings()) }
     var themePreference by remember { mutableStateOf(preferences.themePreference) }
@@ -142,7 +157,7 @@ fun KheyrAppShell() {
         refreshThreads()
     }
     val roleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
-        isDefaultSms = Telephony.Sms.getDefaultSmsPackage(context) == context.packageName
+        isDefaultSms = DefaultSmsRoleChecker.isDefaultSmsApp(context)
         permissionLauncher.launch(requiredPermissions())
     }
 
