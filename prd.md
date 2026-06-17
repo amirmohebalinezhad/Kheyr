@@ -128,7 +128,7 @@ Last updated: 2026-06-17
 - [x] Added message status presentation labels for sending, sent, delivered, and failed states.
 - [x] Added conversation UI state model for header, messages, composer, and search.
 - [x] Added conversation message UI model for bubble, timestamp, and status rendering.
-- [ ] Implement encrypted local storage at rest using SQLCipher or Android encrypted file-backed stores.
+- [x] Implement encrypted local storage at rest using SQLCipher or Android encrypted file-backed stores.
 - [x] Added SMS composer state reducer for send validation, SIM selection, completion, and retryable failures.
 - [ ] Build full Compose conversation UI and retryable send statuses.
 
