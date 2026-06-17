@@ -2,8 +2,8 @@ package com.kheyr.sms.spam
 
 enum class SpamClassification { Normal, Suspicious, Spam }
 object SpamClassificationThresholds {
-    fun classify(score: Int): SpamClassification = when {
-        score >= 70 -> SpamClassification.Spam
+    fun classify(score: Int, threshold: Int = 70): SpamClassification = when {
+        score >= threshold -> SpamClassification.Spam
         score >= 40 -> SpamClassification.Suspicious
         else -> SpamClassification.Normal
     }

@@ -44,41 +44,43 @@ interface SmsDao {
 
     @Query("""
         SELECT t.id, t.address, t.displayName, m.body AS lastMessage, m.timestamp AS lastMessageAt,
-            SUM(CASE WHEN m.direction = 'Incoming' AND m.read = 0 THEN 1 ELSE 0 END) AS unreadCount,
+            (SELECT COUNT(*) FROM messages unread
+                WHERE unread.threadId = t.id AND unread.direction = 'Incoming' AND unread.read = 0) AS unreadCount,
             COALESCE(s.isPinned, 0) AS isPinned, s.pinnedAt AS pinnedAt, COALESCE(s.isMuted, 0) AS isMuted,
             COALESCE(s.isSpam, 0) AS isSpam, COALESCE(s.isArchived, 0) AS isArchived, m.simSlot AS simSlot
         FROM threads t
         JOIN messages m ON m.id = (SELECT newest.id FROM messages newest WHERE newest.threadId = t.id ORDER BY newest.timestamp DESC, newest.id DESC LIMIT 1)
         LEFT JOIN thread_state s ON s.threadId = t.id
         WHERE COALESCE(s.isSpam, 0) = 0 AND COALESCE(s.isArchived, 0) = 0
-        GROUP BY t.id
         ORDER BY COALESCE(s.isPinned, 0) DESC, s.pinnedAt DESC, m.timestamp DESC
     """)
     fun inboxThreads(): List<ThreadWithLatestMessage>
 
     @Query("""
         SELECT t.id, t.address, t.displayName, m.body AS lastMessage, m.timestamp AS lastMessageAt,
-            SUM(CASE WHEN m.direction = 'Incoming' AND m.read = 0 THEN 1 ELSE 0 END) AS unreadCount,
+            (SELECT COUNT(*) FROM messages unread
+                WHERE unread.threadId = t.id AND unread.direction = 'Incoming' AND unread.read = 0) AS unreadCount,
             COALESCE(s.isPinned, 0) AS isPinned, s.pinnedAt AS pinnedAt, COALESCE(s.isMuted, 0) AS isMuted,
             COALESCE(s.isSpam, 0) AS isSpam, COALESCE(s.isArchived, 0) AS isArchived, m.simSlot AS simSlot
         FROM threads t
         JOIN messages m ON m.id = (SELECT newest.id FROM messages newest WHERE newest.threadId = t.id ORDER BY newest.timestamp DESC, newest.id DESC LIMIT 1)
         LEFT JOIN thread_state s ON s.threadId = t.id
         WHERE COALESCE(s.isSpam, 0) = 1
-        GROUP BY t.id ORDER BY m.timestamp DESC
+        ORDER BY m.timestamp DESC
     """)
     fun spamThreads(): List<ThreadWithLatestMessage>
 
     @Query("""
         SELECT t.id, t.address, t.displayName, m.body AS lastMessage, m.timestamp AS lastMessageAt,
-            SUM(CASE WHEN m.direction = 'Incoming' AND m.read = 0 THEN 1 ELSE 0 END) AS unreadCount,
+            (SELECT COUNT(*) FROM messages unread
+                WHERE unread.threadId = t.id AND unread.direction = 'Incoming' AND unread.read = 0) AS unreadCount,
             COALESCE(s.isPinned, 0) AS isPinned, s.pinnedAt AS pinnedAt, COALESCE(s.isMuted, 0) AS isMuted,
             COALESCE(s.isSpam, 0) AS isSpam, COALESCE(s.isArchived, 0) AS isArchived, m.simSlot AS simSlot
         FROM threads t
         JOIN messages m ON m.id = (SELECT newest.id FROM messages newest WHERE newest.threadId = t.id ORDER BY newest.timestamp DESC, newest.id DESC LIMIT 1)
         LEFT JOIN thread_state s ON s.threadId = t.id
         WHERE COALESCE(s.isArchived, 0) = 1 AND COALESCE(s.isSpam, 0) = 0
-        GROUP BY t.id ORDER BY m.timestamp DESC
+        ORDER BY m.timestamp DESC
     """)
     fun archivedThreads(): List<ThreadWithLatestMessage>
 
@@ -108,6 +110,61 @@ interface SmsDao {
 
     @Query("UPDATE messages SET status = :status WHERE id = :messageId")
     fun updateSendStatus(messageId: Long, status: MessageStatus)
+
+    @Query("SELECT * FROM messages WHERE telephonyId = :telephonyId LIMIT 1")
+    fun messageByTelephonyId(telephonyId: Long): SmsMessageEntity?
+
+    @Query("""
+        UPDATE messages
+        SET threadId = :threadId, address = :address, body = :body, timestamp = :timestamp,
+            direction = :direction, status = :status, read = :read, simSlot = :simSlot
+        WHERE telephonyId = :telephonyId
+    """)
+    fun updateTelephonyMessage(
+        telephonyId: Long,
+        threadId: Long,
+        address: String,
+        body: String,
+        timestamp: Instant,
+        direction: MessageDirection,
+        status: MessageStatus,
+        read: Boolean,
+        simSlot: Int?,
+    ): Int
+
+    @Transaction
+    fun upsertTelephonyMessage(message: SmsMessageEntity) {
+        val telephonyId = message.telephonyId
+        if (telephonyId == null) {
+            insertSms(message)
+            return
+        }
+        val existing = messageByTelephonyId(telephonyId)
+        if (existing == null) {
+            insertSms(message)
+        } else {
+            updateTelephonyMessage(
+                telephonyId = telephonyId,
+                threadId = message.threadId,
+                address = message.address,
+                body = message.body,
+                timestamp = message.timestamp,
+                direction = message.direction,
+                status = message.status,
+                read = message.read,
+                simSlot = message.simSlot,
+            )
+            upsertThread(SmsThreadEntity(message.threadId, message.address, message.address, message.timestamp))
+        }
+    }
+
+    @Transaction
+    fun upsertTelephonyMessageBatch(messages: List<SmsMessageEntity>) {
+        messages.forEach(::upsertTelephonyMessage)
+    }
+
+    @Query("SELECT telephonyId FROM messages WHERE telephonyId IS NOT NULL")
+    fun syncedTelephonyIds(): List<Long>
 
     @Query("SELECT * FROM sync_spam_metadata WHERE threadId = :threadId")
     fun syncSpamMetadata(threadId: Long): SyncSpamMetadataEntity?
