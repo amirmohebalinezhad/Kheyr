@@ -130,6 +130,7 @@ Last updated: 2026-06-17
 - [x] Added conversation message UI model for bubble, timestamp, and status rendering.
 - [x] Implement encrypted local storage at rest using SQLCipher or Android encrypted file-backed stores.
 - [x] Added SMS composer state reducer for send validation, SIM selection, completion, and retryable failures.
+- [x] Added thread long-press menu model for pin, archive, delete, spam, read, and mute actions.
 - [x] Added thread list UI state model for drawer folder and search query.
 - [x] Refactored MainActivity conversation screen to use bubble layout and retryable send models.
 - [x] Added conversation screen mapper binding messages, header, and composer state.
