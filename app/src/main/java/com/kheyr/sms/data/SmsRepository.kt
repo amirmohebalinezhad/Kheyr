@@ -78,7 +78,28 @@ class SmsRepository(
     fun updateSendStatus(messageId: Long, status: MessageStatus) = smsDao.updateSendStatus(messageId, status)
 
     private fun syncTelephonyMessages() {
-        val newestSyncedId = smsDao.latestSyncedTelephonyId()
+        syncTelephonyMessages(newerThanId = smsDao.latestSyncedTelephonyId())
+        smsDao.syncedTelephonyIds()
+            .chunked(SYNC_REFRESH_BATCH_SIZE)
+            .forEach { ids -> syncTelephonyMessages(telephonyIds = ids) }
+    }
+
+    private fun syncTelephonyMessages(newerThanId: Long? = null, telephonyIds: List<Long>? = null) {
+        val selection: String
+        val selectionArgs: Array<String>
+        when {
+            telephonyIds != null -> {
+                if (telephonyIds.isEmpty()) return
+                val placeholders = telephonyIds.joinToString(",") { "?" }
+                selection = "${Telephony.Sms._ID} IN ($placeholders)"
+                selectionArgs = telephonyIds.map(Long::toString).toTypedArray()
+            }
+            newerThanId != null -> {
+                selection = "${Telephony.Sms._ID} > ?"
+                selectionArgs = arrayOf(newerThanId.toString())
+            }
+            else -> return
+        }
         val projection = arrayOf(
             Telephony.Sms._ID,
             Telephony.Sms.THREAD_ID,
@@ -93,8 +114,8 @@ class SmsRepository(
         context.contentResolver.query(
             Telephony.Sms.CONTENT_URI,
             projection,
-            "${Telephony.Sms._ID} > ?",
-            arrayOf(newestSyncedId.toString()),
+            selection,
+            selectionArgs,
             "${Telephony.Sms._ID} ASC",
         )?.use { cursor ->
             val id = cursor.getColumnIndexOrThrow(Telephony.Sms._ID)
@@ -131,12 +152,12 @@ class SmsRepository(
                     read = cursor.getInt(read) != 0 || direction == MessageDirection.Outgoing,
                 )
                 if (messages.size == SYNC_INSERT_BATCH_SIZE) {
-                    smsDao.insertSmsBatch(messages)
+                    smsDao.upsertTelephonyMessageBatch(messages)
                     messages.clear()
                 }
             }
             if (messages.isNotEmpty()) {
-                smsDao.insertSmsBatch(messages)
+                smsDao.upsertTelephonyMessageBatch(messages)
             }
         }
     }
@@ -245,6 +266,7 @@ class SmsRepository(
     companion object {
         private const val SUBSCRIPTION_ID = "sub_id"
         private const val SYNC_INSERT_BATCH_SIZE = 500
+        private const val SYNC_REFRESH_BATCH_SIZE = 200
     }
     private fun SmsMessageEntity.toModel() = SmsMessage(
         id = id,

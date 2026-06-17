@@ -1,9 +1,11 @@
 package com.kheyr.sms.ui
 
 import com.kheyr.sms.data.SmsThread
+import com.kheyr.sms.telephony.SimBadgeResolver
+import com.kheyr.sms.telephony.SimCard
 
 class ThreadRowPresentationMapper {
-    fun map(thread: SmsThread, folder: ThreadFolder): ThreadRowPresentation = ThreadRowPresentation(
+    fun map(thread: SmsThread, folder: ThreadFolder, activeSims: List<SimCard> = emptyList()): ThreadRowPresentation = ThreadRowPresentation(
         title = thread.displayName.ifBlank { thread.address },
         preview = thread.lastMessage,
         unreadBadge = thread.unreadCount.takeIf { it > 0 }?.coerceAtMost(MAX_BADGE_COUNT)?.toString()?.let {
@@ -11,7 +13,7 @@ class ThreadRowPresentationMapper {
         },
         showPinned = thread.isPinned,
         showMuted = thread.isMuted,
-        simBadge = thread.simSlot?.let { "SIM ${it + 1}" },
+        simBadge = SimBadgeResolver.badge(thread.simSlot, activeSims),
         showSpamBadge = folder == ThreadFolder.Spam && thread.isSpam,
     )
 

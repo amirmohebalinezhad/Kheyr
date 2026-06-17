@@ -20,5 +20,11 @@ class SpamRuleUpdatePolicyTest {
         assertTrue(policy.evaluate(rules(version = 2), invalid) is SpamRuleUpdateDecision.RejectInvalid)
     }
 
+    @Test fun acceptsPatternlessSuspiciousLinkRule() {
+        val suspiciousLinkRule = SpamRule("suspicious-link", SpamRuleType.SuspiciousLinkPattern, score = 45)
+        val candidate = rules(version = 3).copy(rules = listOf(suspiciousLinkRule))
+        assertEquals(SpamRuleUpdateDecision.Accept, policy.evaluate(rules(version = 2), candidate))
+    }
+
     private fun rules(version: Int) = SpamRuleSet(version, threshold = 70, rules = listOf(SpamRule("url", SpamRuleType.UrlDetected, score = 40)))
 }

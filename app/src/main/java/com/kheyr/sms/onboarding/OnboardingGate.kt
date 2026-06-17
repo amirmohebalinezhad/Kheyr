@@ -1,7 +1,7 @@
 package com.kheyr.sms.onboarding
 
 data class OnboardingGateState(val isDefaultSmsApp: Boolean, val smsPermissionGranted: Boolean, val contactsPermissionGranted: Boolean, val notificationPermissionGranted: Boolean) {
-    val canUseFullSmsFeatures: Boolean get() = isDefaultSmsApp && smsPermissionGranted
+    val canUseFullSmsFeatures: Boolean get() = missingRequirements.isEmpty()
     val missingRequirements: Set<OnboardingRequirement> get() = buildSet {
         if (!isDefaultSmsApp) add(OnboardingRequirement.DefaultSmsRole)
         if (!smsPermissionGranted) add(OnboardingRequirement.SmsPermission)

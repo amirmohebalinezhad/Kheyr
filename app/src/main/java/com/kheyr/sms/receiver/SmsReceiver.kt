@@ -1,12 +1,15 @@
 package com.kheyr.sms.receiver
 
+import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
+import android.content.ContentUris
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.ContactsContract
@@ -14,6 +17,7 @@ import android.provider.Telephony
 import android.telephony.SmsMessage
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import com.kheyr.sms.MainActivity
 import com.kheyr.sms.domain.SpamRule
 import com.kheyr.sms.domain.SpamRuleSet
@@ -89,6 +93,9 @@ private class SharedPreferencesSpamRulesProvider(context: Context) : SpamRulesPr
 private class AndroidContactLookup(private val context: Context) : SenderContactLookup {
     override fun isKnownContact(sender: String): Boolean {
         if (sender.isBlank()) return false
+        if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) {
+            return false
+        }
         val uri = Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(sender))
         return context.contentResolver.query(uri, arrayOf(ContactsContract.PhoneLookup._ID), null, null, null)?.use { it.moveToFirst() } == true
     }
@@ -111,12 +118,22 @@ private class AndroidSmsStore(private val context: Context, private val isSpam: 
             message.subscriptionId?.let { put("sub_id", it) }
         }
         val uri = context.contentResolver.insert(Telephony.Sms.Inbox.CONTENT_URI, values)
-        val threadId = uri?.lastPathSegment?.toLongOrNull() ?: message.receivedAtMillis
+        val messageRowId = uri?.let(ContentUris::parseId)
+        val threadId = messageRowId?.let(::threadIdForMessageRow)
+            ?: Telephony.Threads.getOrCreateThreadId(context, setOf(message.sender))
         context.getSharedPreferences("sms_classification", Context.MODE_PRIVATE).edit()
             .putBoolean("thread:$threadId:spam", spam || isSpam)
             .apply()
         return StoredIncomingSms(threadId, message.sender, message.body, message.receivedAtMillis, message.simSlot, message.subscriptionId)
     }
+
+    private fun threadIdForMessageRow(messageRowId: Long): Long? = context.contentResolver.query(
+        ContentUris.withAppendedId(Telephony.Sms.CONTENT_URI, messageRowId),
+        arrayOf(Telephony.Sms.THREAD_ID),
+        null,
+        null,
+        null,
+    )?.use { cursor -> if (cursor.moveToFirst()) cursor.getLong(0) else null }
 }
 
 private class AndroidIncomingSmsNotifier(private val context: Context) : IncomingSmsNotifier {

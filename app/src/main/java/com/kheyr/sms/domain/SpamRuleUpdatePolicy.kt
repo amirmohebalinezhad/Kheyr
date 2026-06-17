@@ -10,7 +10,10 @@ class SpamRuleUpdatePolicy {
         return if (invalidRule == null) SpamRuleUpdateDecision.Accept else SpamRuleUpdateDecision.RejectInvalid("Invalid rule: ${invalidRule.id}")
     }
 
-    private fun SpamRule.requiresPattern(): Boolean = type != SpamRuleType.UrlDetected && type != SpamRuleType.SenderNotInContacts && type != SpamRuleType.ShortCode
+    private fun SpamRule.requiresPattern(): Boolean = type != SpamRuleType.UrlDetected &&
+        type != SpamRuleType.SenderNotInContacts &&
+        type != SpamRuleType.ShortCode &&
+        type != SpamRuleType.SuspiciousLinkPattern
 }
 
 sealed interface SpamRuleUpdateDecision {

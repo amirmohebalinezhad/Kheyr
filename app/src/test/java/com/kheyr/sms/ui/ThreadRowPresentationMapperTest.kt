@@ -1,6 +1,7 @@
 package com.kheyr.sms.ui
 
 import com.kheyr.sms.data.SmsThread
+import com.kheyr.sms.telephony.SimCard
 import java.time.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -11,7 +12,8 @@ class ThreadRowPresentationMapperTest {
     private val mapper = ThreadRowPresentationMapper()
 
     @Test fun mapsRequiredThreadRowBadges() {
-        val row = mapper.map(thread(unreadCount = 120, isPinned = true, isMuted = true, isSpam = true, simSlot = 1), ThreadFolder.Spam)
+        val sims = listOf(SimCard(subscriptionId = 1, slotIndex = 1, displayName = "SIM 2", carrierName = "Carrier"))
+        val row = mapper.map(thread(unreadCount = 120, isPinned = true, isMuted = true, isSpam = true, simSlot = 1), ThreadFolder.Spam, sims)
 
         assertEquals("Alice", row.title)
         assertEquals("99+", row.unreadBadge)

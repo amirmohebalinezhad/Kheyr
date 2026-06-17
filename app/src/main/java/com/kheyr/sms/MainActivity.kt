@@ -3,6 +3,7 @@ package com.kheyr.sms
 import android.Manifest
 import android.app.role.RoleManager
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.provider.Telephony
@@ -22,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
 import kotlinx.coroutines.launch
 import com.kheyr.sms.data.MessageDirection
 import com.kheyr.sms.data.MessageStatus
@@ -56,18 +58,26 @@ fun KheyrApp() {
     var messages by remember { mutableStateOf<List<SmsMessage>>(emptyList()) }
     var isDefaultSms by remember { mutableStateOf(Telephony.Sms.getDefaultSmsPackage(context) == context.packageName) }
     var sims by remember { mutableStateOf<List<SimCard>>(emptyList()) }
+    fun hasSmsReadAccess(): Boolean = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED
     fun refreshThreads() {
+        if (!hasSmsReadAccess()) return
         coroutineScope.launch {
             val loadedThreads = repository.loadThreads()
             threads = loadedThreads
             selectedThread?.let { current ->
-                messages = repository.loadMessages(current.id)
-                selectedThread = loadedThreads.firstOrNull { it.id == current.id } ?: current
+                val threadId = current.id
+                val loadedMessages = repository.loadMessages(threadId)
+                if (selectedThread?.id == threadId) {
+                    messages = loadedMessages
+                    selectedThread = loadedThreads.firstOrNull { it.id == threadId } ?: current
+                }
             }
         }
     }
-    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
-        refreshThreads()
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
+        if (results[Manifest.permission.READ_SMS] == true) {
+            refreshThreads()
+        }
         sims = simRepository.activeSims()
     }
     val roleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
@@ -115,8 +125,12 @@ fun KheyrApp() {
                     }
                     ThreadList(threads = threads, onThreadSelected = { thread ->
                         selectedThread = thread
+                        messages = emptyList()
                         coroutineScope.launch {
-                            messages = repository.loadMessages(thread.id)
+                            val loadedMessages = repository.loadMessages(thread.id)
+                            if (selectedThread?.id == thread.id) {
+                                messages = loadedMessages
+                            }
                         }
                     })
                 } else {

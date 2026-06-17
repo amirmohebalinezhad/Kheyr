@@ -97,6 +97,23 @@ class SmsDaoTest {
         assertEquals(0, dao.inboxThreads().single { it.id == 1L }.unreadCount)
     }
 
+    @Test fun telephonyUpsertRefreshesExistingMessageState() {
+        dao.upsertTelephonyMessage(
+            message(threadId = 1, body = "pending", at = "2026-01-01T00:00:00Z", direction = MessageDirection.Outgoing, status = MessageStatus.Sending, read = true)
+                .copy(telephonyId = 42),
+        )
+        dao.upsertTelephonyMessage(
+            message(threadId = 1, body = "sent", at = "2026-01-02T00:00:00Z", direction = MessageDirection.Outgoing, status = MessageStatus.Sent, read = true)
+                .copy(telephonyId = 42),
+        )
+
+        val stored = dao.messageByTelephonyId(42)
+
+        assertEquals(MessageStatus.Sent, stored?.status)
+        assertEquals("sent", stored?.body)
+        assertEquals("sent", dao.inboxThreads().single().lastMessage)
+    }
+
     @Test fun searchFailedMessagesMutedThreadsAndSpamMetadataAreAvailableLocally() {
         dao.insertIncomingSms(message(threadId = 1, body = "bank alert", at = "2026-01-01T00:00:00Z"))
         dao.insertOutgoingSms(message(threadId = 2, body = "retry me", at = "2026-01-02T00:00:00Z", direction = MessageDirection.Outgoing, status = MessageStatus.Failed, read = true))
