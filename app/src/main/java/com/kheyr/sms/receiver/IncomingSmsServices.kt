@@ -24,6 +24,8 @@ import com.kheyr.sms.domain.SpamRuleSet
 import com.kheyr.sms.preferences.AppPreferences
 import com.kheyr.sms.settings.NotificationPolicyResolver
 import com.kheyr.sms.settings.ThreadNotificationSettings
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
 import java.time.Instant
 
 class PreferencesSpamRulesProvider(private val preferences: AppPreferences, private val defaults: SpamRuleSet) : SpamRulesProvider {
@@ -65,7 +67,7 @@ class RoomIncomingSmsStore(
             read = false,
             simSlot = message.simSlot,
         )
-        if (spam || markSpam) repository.updateSpam(threadId, true)
+        if (spam || markSpam) runBlocking(Dispatchers.IO) { repository.updateSpam(threadId, true) }
         return StoredIncomingSms(threadId, message.sender, message.body, message.receivedAtMillis, message.simSlot, message.subscriptionId)
     }
 
