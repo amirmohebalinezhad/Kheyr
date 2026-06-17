@@ -131,6 +131,7 @@ Last updated: 2026-06-17
 - [x] Implement encrypted local storage at rest using SQLCipher or Android encrypted file-backed stores.
 - [x] Added SMS composer state reducer for send validation, SIM selection, completion, and retryable failures.
 - [ ] Build full Compose conversation UI and retryable send statuses.
+- [x] Added local database passphrase store backed by Android encrypted preferences.
 
 ---
 
