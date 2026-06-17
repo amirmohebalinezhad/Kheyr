@@ -71,6 +71,10 @@ class SmsRepository(
 
     fun updateSpam(threadId: Long, spam: Boolean) = smsDao.updateSpam(threadId, spam)
 
+    fun updateMuted(threadId: Long, muted: Boolean) = smsDao.updateMuted(threadId, muted)
+
+    fun markThreadRead(threadId: Long) = smsDao.markThreadRead(threadId)
+
     fun updateSendStatus(messageId: Long, status: MessageStatus) = smsDao.updateSendStatus(messageId, status)
 
     private fun syncTelephonyMessages() {
@@ -135,6 +139,18 @@ class SmsRepository(
                 smsDao.insertSmsBatch(messages)
             }
         }
+    }
+
+    suspend fun loadLocalMessages(threadId: Long): List<SmsMessage> = withContext(Dispatchers.IO) {
+        smsDao.messagesForThread(threadId).map { it.toModel() }
+    }
+
+    suspend fun searchLocalMessages(query: String): List<SmsMessage> = withContext(Dispatchers.IO) {
+        smsDao.searchMessages(query).map { it.toModel() }
+    }
+
+    suspend fun loadFailedOutgoingMessages(): List<SmsMessage> = withContext(Dispatchers.IO) {
+        smsDao.failedOutgoingMessages().map { it.toModel() }
     }
 
     suspend fun loadMessages(threadId: Long): List<SmsMessage> = withContext(Dispatchers.IO) {
@@ -230,6 +246,17 @@ class SmsRepository(
         private const val SUBSCRIPTION_ID = "sub_id"
         private const val SYNC_INSERT_BATCH_SIZE = 500
     }
+    private fun SmsMessageEntity.toModel() = SmsMessage(
+        id = id,
+        threadId = threadId,
+        address = address,
+        body = body,
+        timestamp = timestamp,
+        direction = direction,
+        status = status,
+        simSlot = simSlot,
+    )
+
     private fun ThreadWithLatestMessage.toModel() = SmsThread(
         id = id,
         address = address,

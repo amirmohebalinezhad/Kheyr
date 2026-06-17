@@ -86,6 +86,28 @@ class SmsDaoTest {
             MessageStatus.valueOf(it.getString(0))
         })
     }
+    @Test fun conversationMessagesLoadChronologicallyAndCanBeMarkedRead() {
+        dao.insertIncomingSms(message(threadId = 1, body = "later", at = "2026-01-02T00:00:00Z", read = false))
+        dao.insertIncomingSms(message(threadId = 1, body = "earlier", at = "2026-01-01T00:00:00Z", read = false))
+
+        assertEquals(listOf("earlier", "later"), dao.messagesForThread(1).map { it.body })
+
+        dao.markThreadRead(1)
+
+        assertEquals(0, dao.inboxThreads().single { it.id == 1L }.unreadCount)
+    }
+
+    @Test fun searchFailedMessagesMutedThreadsAndSpamMetadataAreAvailableLocally() {
+        dao.insertIncomingSms(message(threadId = 1, body = "bank alert", at = "2026-01-01T00:00:00Z"))
+        dao.insertOutgoingSms(message(threadId = 2, body = "retry me", at = "2026-01-02T00:00:00Z", direction = MessageDirection.Outgoing, status = MessageStatus.Failed, read = true))
+        dao.updateMuted(1, true)
+        dao.upsertSyncSpamMetadata(SyncSpamMetadataEntity(threadId = 1, spamScore = 72.0, spamReason = "url,winner"))
+
+        assertEquals(listOf("bank alert"), dao.searchMessages("bank").map { it.body })
+        assertEquals(listOf("retry me"), dao.failedOutgoingMessages().map { it.body })
+        assertEquals(true, dao.inboxThreads().single { it.id == 1L }.isMuted)
+        assertEquals("url,winner", dao.syncSpamMetadata(1)?.spamReason)
+    }
 
     private fun message(
         threadId: Long,
