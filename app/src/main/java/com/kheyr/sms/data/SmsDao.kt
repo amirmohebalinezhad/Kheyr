@@ -134,7 +134,11 @@ interface SmsDao {
 
     @Transaction
     fun upsertTelephonyMessage(message: SmsMessageEntity) {
-        val telephonyId = message.telephonyId ?: return insertSms(message)
+        val telephonyId = message.telephonyId
+        if (telephonyId == null) {
+            insertSms(message)
+            return
+        }
         val existing = messageByTelephonyId(telephonyId)
         if (existing == null) {
             insertSms(message)
