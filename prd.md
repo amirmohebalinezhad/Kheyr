@@ -130,6 +130,7 @@ Last updated: 2026-06-17
 - [x] Added conversation message UI model for bubble, timestamp, and status rendering.
 - [x] Implement encrypted local storage at rest using SQLCipher or Android encrypted file-backed stores.
 - [x] Added SMS composer state reducer for send validation, SIM selection, completion, and retryable failures.
+- [x] Added background sync scheduler policy for WorkManager upload and pull cadence.
 - [x] Added offline mode state detecting network unavailability and queued operations.
 - [x] Added direct message read status model for read receipt sync.
 - [x] Added direct message delivery status tracking for sent, delivered, and failed states.
