@@ -5,6 +5,7 @@ import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
+import net.sqlcipher.database.SupportFactory
 
 @Database(
     entities = [SmsThreadEntity::class, SmsMessageEntity::class, ThreadStateEntity::class, SyncSpamMetadataEntity::class],
@@ -19,10 +20,16 @@ abstract class AppDatabase : RoomDatabase() {
         @Volatile private var instance: AppDatabase? = null
 
         fun getInstance(context: Context): AppDatabase = instance ?: synchronized(this) {
-            instance ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "kheyr_sms.db")
+            instance ?: buildEncryptedDatabase(context.applicationContext).also { instance = it }
+        }
+
+        private fun buildEncryptedDatabase(context: Context): AppDatabase {
+            val passphrase = LocalDatabasePassphraseStore(context).getOrCreatePassphrase()
+            val factory = SupportFactory(passphrase)
+            return Room.databaseBuilder(context, AppDatabase::class.java, EncryptedDatabasePolicy.databaseFileName)
+                .openHelperFactory(factory)
                 .fallbackToDestructiveMigration()
                 .build()
-                .also { instance = it }
         }
     }
 }
