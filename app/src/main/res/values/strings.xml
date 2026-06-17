@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Kheyr SMS</string>
+    <string name="default_sms_explanation">Kheyr needs to be your default SMS app to read, receive, and send SMS.</string>
+</resources>

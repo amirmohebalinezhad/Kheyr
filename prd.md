@@ -2,6 +2,29 @@
 
 ## Product: Modern SMS App with Spam Filtering, Sync, Desktop SMS, and Direct Messages
 
+## Implementation Progress
+
+Last updated: 2026-06-17
+
+### Android Phase 0 Started
+
+- [x] Created Kotlin/Jetpack Compose Android app scaffold.
+- [x] Added default SMS role request flow and SMS/contact/notification permission request flow.
+- [x] Added default SMS manifest hooks for SMS delivery, SENDTO compose intents, and respond-via-message service.
+- [x] Added local SMS thread loading prototype from Android `Telephony.Sms`.
+- [x] Added dual-SIM discovery model and active SIM repository prototype.
+- [x] Added multipart SMS sending helper with optional subscription/SIM selection.
+- [x] Added local spam scoring engine with number-prefix, keyword, URL, sender/contact, regex, OTP negative-score, and short-code rule support.
+- [x] Added inbox thread sorting for pinned-first behavior, pin-date ordering, and spam/archive hiding.
+- [x] Added notification settings models for content privacy, unknown senders, ringtone, vibration, and per-thread mute/ringtone overrides.
+- [x] Added GitHub Actions debug APK build artifact for every push, pull request, and manual workflow run.
+- [ ] Persist SMS locally with Room.
+- [ ] Suppress notifications for classified spam in the receiver path.
+- [ ] Implement encrypted local storage and sync upload pipeline.
+- [ ] Build full conversation UI and retryable send statuses.
+
+---
+
 ## 1. Product Overview
 
 The product is a modern Android SMS replacement app with a Telegram-like interface. It allows users to view SMS threads, send and receive SMS, classify spam using server-managed global spam rules, move spam messages to a Spam folder, suppress spam notifications, customize notification behavior per contact, sync SMS messages securely to a server, and use a native desktop app to read and send SMS through the Android phone.
