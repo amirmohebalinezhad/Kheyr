@@ -128,9 +128,58 @@ Last updated: 2026-06-17
 - [x] Added message status presentation labels for sending, sent, delivered, and failed states.
 - [x] Added conversation UI state model for header, messages, composer, and search.
 - [x] Added conversation message UI model for bubble, timestamp, and status rendering.
-- [ ] Implement encrypted local storage at rest using SQLCipher or Android encrypted file-backed stores.
+- [x] Implement encrypted local storage at rest using SQLCipher or Android encrypted file-backed stores.
 - [x] Added SMS composer state reducer for send validation, SIM selection, completion, and retryable failures.
-- [ ] Build full Compose conversation UI and retryable send statuses.
+- [x] Added cloud data export request model for synced data export with completion status.
+- [x] Added spam feedback history for local Mark Spam and Mark Not Spam corrections.
+- [x] Added spam auto-delete policy for configurable spam thread retention in days.
+- [x] Added thread reminder state model with due date and local notification trigger.
+- [x] Added scheduled SMS request model with recipient, body, SIM, and trigger timestamp.
+- [x] Added SMS failure recovery planner suggesting retry, SIM switch, or user guidance.
+- [x] Added background sync scheduler policy for WorkManager upload and pull cadence.
+- [x] Added offline mode state detecting network unavailability and queued operations.
+- [x] Added direct message read status model for read receipt sync.
+- [x] Added direct message delivery status tracking for sent, delivered, and failed states.
+- [x] Added direct message send request payload with recipient hash and client message id.
+- [x] Added direct message settings model for global direct messaging enablement toggle.
+- [x] Added contact registration lookup for discovering registered app users by phone.
+- [x] Added desktop relay queue expiry policy for stale unsent relay requests.
+- [x] Added desktop relay request handler model for incoming desktop SMS send requests.
+- [x] Added spam rule downloader for fetching and validating latest global spam rules.
+- [x] Added message frequency scorer for repeated-sender spam rule evaluation.
+- [x] Added blocked sender notification policy suppressing alerts from blocked addresses.
+- [x] Added blocked sender state model with sync metadata for per-sender suppression.
+- [x] Added help and feedback model for support URLs and in-app feedback submission.
+- [x] Added about settings model for app version, build, and legal links.
+- [x] Added sync settings model for enablement toggle, status label, and last-sync timestamp.
+- [x] Added dual SIM settings model exposing global default and per-thread override summary.
+- [x] Added pairing approval state machine for QR scan and desktop credential handoff.
+- [x] Added sync retry policy with exponential backoff for failed upload and download.
+- [x] Added realtime connection state model for WebSocket sync and desktop relay push.
+- [x] Added sync update applier for downloaded encrypted message and thread deltas.
+- [x] Added sync downloader for incremental server pull using cursor checkpoints.
+- [x] Added sync encryption key store policy for Android Keystore-backed key management.
+- [x] Added SMS import planner for batched existing-message backfill during onboarding.
+- [x] Added onboarding sync opt-in model for optional account creation during setup.
+- [x] Added permission denial state resolving limited-mode behavior for denied permissions.
+- [x] Added welcome screen copy for default SMS requirement explainer.
+- [x] Added logout plan defining credential, sync key, and queue cleanup steps.
+- [x] Added account deletion request model with local wipe prerequisites.
+- [x] Added device registration payload for Android device name, platform, and public key.
+- [x] Added auth token state for access and refresh token expiry tracking.
+- [x] Added OTP verification state for code entry, resend cooldown, and verification outcome.
+- [x] Added phone login request model with E.164 normalization for OTP sign-in.
+- [x] Added incoming message presentation rules for SIM badge and relative timestamps.
+- [x] Added compose FAB state model for new conversation navigation.
+- [x] Added thread avatar presentation helper for initials and contact-photo availability.
+- [x] Added thread long-press menu model for pin, archive, delete, spam, read, and mute actions.
+- [x] Added thread list UI state model for drawer folder and search query.
+- [x] Refactored MainActivity conversation screen to use bubble layout and retryable send models.
+- [x] Added conversation screen mapper binding messages, header, and composer state.
+- [x] Added retryable send UI model for failed outgoing conversation messages.
+- [x] Build full Compose conversation UI and retryable send statuses.
+- [x] Wired encrypted Room database builder using SQLCipher support factory.
+- [x] Added local database passphrase store backed by Android encrypted preferences.
 
 ---
 
