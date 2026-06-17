@@ -8,13 +8,14 @@ import androidx.room.TypeConverters
 import net.sqlcipher.database.SupportFactory
 
 @Database(
-    entities = [SmsThreadEntity::class, SmsMessageEntity::class, ThreadStateEntity::class, SyncSpamMetadataEntity::class],
-    version = 1,
+    entities = [SmsThreadEntity::class, SmsMessageEntity::class, ThreadStateEntity::class, SyncSpamMetadataEntity::class, SyncQueueEntity::class],
+    version = 2,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun smsDao(): SmsDao
+    abstract fun syncQueueDao(): SyncQueueDao
 
     companion object {
         @Volatile private var instance: AppDatabase? = null
