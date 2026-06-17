@@ -166,6 +166,29 @@ interface SmsDao {
     @Query("SELECT telephonyId FROM messages WHERE telephonyId IS NOT NULL")
     fun syncedTelephonyIds(): List<Long>
 
+    @Query("""
+        SELECT t.id, t.address, t.displayName, m.body AS lastMessage, m.timestamp AS lastMessageAt,
+            (SELECT COUNT(*) FROM messages unread
+                WHERE unread.threadId = t.id AND unread.direction = 'Incoming' AND unread.read = 0) AS unreadCount,
+            COALESCE(s.isPinned, 0) AS isPinned, s.pinnedAt AS pinnedAt, COALESCE(s.isMuted, 0) AS isMuted,
+            COALESCE(s.isSpam, 0) AS isSpam, COALESCE(s.isArchived, 0) AS isArchived, m.simSlot AS simSlot
+        FROM threads t
+        JOIN messages m ON m.id = (SELECT newest.id FROM messages newest WHERE newest.threadId = t.id ORDER BY newest.timestamp DESC, newest.id DESC LIMIT 1)
+        LEFT JOIN thread_state s ON s.threadId = t.id
+        WHERE COALESCE(s.isPinned, 0) = 1 AND COALESCE(s.isSpam, 0) = 0 AND COALESCE(s.isArchived, 0) = 0
+        ORDER BY s.pinnedAt DESC, m.timestamp DESC
+    """)
+    fun pinnedThreads(): List<ThreadWithLatestMessage>
+
+    @Query("DELETE FROM messages WHERE threadId = :threadId")
+    fun deleteThreadMessages(threadId: Long)
+
+    @Query("SELECT COALESCE(s.isMuted, 0) FROM thread_state s WHERE s.threadId = :threadId")
+    fun isThreadMuted(threadId: Long): Boolean?
+
+    @Query("SELECT COALESCE(s.isSpam, 0) FROM thread_state s WHERE s.threadId = :threadId")
+    fun isThreadSpam(threadId: Long): Boolean?
+
     @Query("SELECT * FROM sync_spam_metadata WHERE threadId = :threadId")
     fun syncSpamMetadata(threadId: Long): SyncSpamMetadataEntity?
 }

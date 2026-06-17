@@ -18,6 +18,8 @@ class SmsRepository(
         smsDao.inboxThreads().map { it.toModel() }
     }
 
+    suspend fun loadPinnedThreads(): List<SmsThread> = withContext(Dispatchers.IO) { smsDao.pinnedThreads().map { it.toModel() } }
+
     suspend fun loadSpamThreads(): List<SmsThread> = withContext(Dispatchers.IO) { smsDao.spamThreads().map { it.toModel() } }
 
     suspend fun loadArchivedThreads(): List<SmsThread> = withContext(Dispatchers.IO) { smsDao.archivedThreads().map { it.toModel() } }
@@ -161,6 +163,8 @@ class SmsRepository(
             }
         }
     }
+
+    fun deleteThreadMessages(threadId: Long) = smsDao.deleteThreadMessages(threadId)
 
     suspend fun loadLocalMessages(threadId: Long): List<SmsMessage> = withContext(Dispatchers.IO) {
         smsDao.messagesForThread(threadId).map { it.toModel() }

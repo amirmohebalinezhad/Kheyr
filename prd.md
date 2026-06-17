@@ -181,6 +181,23 @@ Last updated: 2026-06-17
 - [x] Wired encrypted Room database builder using SQLCipher support factory.
 - [x] Added local database passphrase store backed by Android encrypted preferences.
 
+### Android Phase 1 UI & Integration
+
+- [x] Added HTTP API layer with configurable `API_BASE_URL` placeholder for all PRD backend endpoints.
+- [x] Added `KheyrApiService` covering auth, spam rules, sync upload/download, pairing, desktop relay, direct messages, and privacy APIs.
+- [x] Added `AppPreferences` for onboarding, theme, notifications, sync, auth tokens, spam rules cache, and blocked senders.
+- [x] Added navigation drawer with All Messages, Spam, Archived, Pinned, Contacts, Desktop Sync, Settings, and Help.
+- [x] Added multi-step onboarding flow (default SMS, permissions, optional sync account, import/rules).
+- [x] Added thread folder screens with search, badges, and long-press actions (pin, archive, spam, mute, delete, read).
+- [x] Added settings screens for all nine PRD categories with local persistence.
+- [x] Added conversation search, call action, and Room-backed message loading.
+- [x] Added system/light/dark theme support via `ThemePreferenceResolver`.
+- [x] Refactored `SmsReceiver` to persist spam/inbox state in Room and apply `NotificationPolicyResolver`.
+- [x] Added Room sync queue entity and `RoomSyncQueueStore` for encrypted sync upload pipeline.
+- [x] Added WorkManager `SyncWorker` and `SpamRulesWorker` with periodic scheduling.
+- [x] Added `KheyrApplication` bootstrap and `HeadlessSmsSendService` respond-via-message handling.
+- [x] Added Desktop Sync and Help screens with backend URL placeholder guidance.
+
 ---
 
 ## 1. Product Overview
