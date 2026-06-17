@@ -48,6 +48,86 @@ Last updated: 2026-06-17
 - [x] Added retry policy for failed outgoing SMS send attempts.
 - [x] Added initial sync backfill planner that skips history deleted before sync opt-in.
 - [x] Added conversation header model for contact title, SIM indicator, call, info, and search actions.
+- [x] Added advanced local search filter for sender, content, and timestamp ranges.
+- [x] Added battery restriction warning model for background sync reliability.
+- [x] Added core analytics metric names for activation, sync, desktop pairing, SMS relay, and spam feedback.
+- [x] Added cloud data deletion request model for privacy tooling.
+- [x] Added local backup plan model for Phase 3 import and export backups.
+- [x] Added picture message eligibility guard that only allows pictures in Direct Message mode.
+- [x] Added direct message badge labels that clearly distinguish SMS from Direct Messages.
+- [x] Added direct message mode resolver that falls back to SMS when recipients are not registered.
+- [x] Added desktop failed-send retry model for SMS relay requests.
+- [x] Added desktop folder model for All Messages, Spam, Archived, and Pinned views.
+- [x] Added desktop thread ordering helper that mirrors Android pinned-first sorting.
+- [x] Added theme preference resolver for system, light, and dark appearance choices.
+- [x] Added local data delete plan for desktop logout and privacy settings.
+- [x] Added desktop device settings state for viewing and revoking paired desktop devices.
+- [x] Added spam rule version display helper for settings and spam details.
+- [x] Added settings category order matching Notifications through About from the PRD.
+- [x] Added desktop waiting-for-phone state model for offline Android relay requests.
+- [x] Added pairing expiry policy for time-limited QR pairing sessions.
+- [x] Added device revocation result model for Android-managed desktop device removal.
+- [x] Added encrypted field policy describing which SMS fields must be encrypted or hashed before upload.
+- [x] Added thread state sync payload for spam, pin, archive, and read states.
+- [x] Added delete event sync model for removing messages from the server after sync opt-in.
+- [x] Added initial sync progress model for visible upload status after sync is enabled.
+- [x] Added sync enablement gate requiring explicit user opt-in before upload.
+- [x] Added vibration decision model that suppresses vibration for muted and silent conversations.
+- [x] Added ringtone override resolver that prioritizes thread ringtones over global defaults.
+- [x] Added unknown sender notification policy for normal, silent, and suppressed alerts.
+- [x] Added notification content formatter for preview, sender-only, and hidden-content privacy modes.
+- [x] Added spam feedback anonymizer that strips raw SMS bodies before upload.
+- [x] Added spam false-positive restore planner for Mark Not Spam actions.
+- [x] Added spam folder unread counter that counts unread spam threads only.
+- [x] Added spam reason formatter for user-visible spam details.
+- [x] Added spam classification thresholds for normal, suspicious, and spam scores.
+- [x] Added desktop SIM routing request model that carries optional desktop-selected SIM preferences.
+- [x] Added per-thread SIM preference model for overriding the global default SIM.
+- [x] Added SIM failure message mapper for clear dual-SIM send errors.
+- [x] Added emoji-only style resolver that keeps timestamps and status visible without normal bubbles.
+- [x] Added conversation search matcher that returns matching message ids for a query.
+- [x] Added conversation message action resolver for copy, delete, spam correction, and retry availability.
+- [x] Added message status timeline validator for sending, sent, delivered, and failed transitions.
+- [x] Added multipart SMS planner that estimates message segment counts for long outgoing bodies.
+- [x] Added outgoing SMS draft validation for recipient, body, and optional SIM selection.
+- [x] Added thread deletion sync planner that emits delete events only after sync is enabled.
+- [x] Added thread bulk action request model for delete, archive, spam, and read operations.
+- [x] Added thread search matcher across contact names, phone numbers, and last message previews.
+- [x] Added spam rules download state for onboarding and cached-rule fallback.
+- [x] Added SMS import progress model for existing local message backfill.
+- [x] Added default SMS role removal warning state for users who lose default app status.
+- [x] Added permission explainer copy for SMS, contacts, and notifications during onboarding.
+- [x] Added onboarding gate that blocks full SMS features until default SMS role and required permissions are granted.
+- [x] Added phase 2 direct message availability model with SMS fallback visibility.
+- [x] Added desktop conversation mock model for validating Avalonia UI direction against Android state.
+- [x] Added unread thread state model for unread count and read sync timestamp.
+- [x] Added pinned thread state model with pin timestamp ordering support.
+- [x] Added archive state model for archive visibility and sync metadata.
+- [x] Added message action model for copy, delete, spam correction, and retry actions.
+- [x] Added thread action model for pin, archive, delete, spam, read, mute, and notification settings actions.
+- [x] Added spam protection settings model exposing enabled state, rule version, and threshold.
+- [x] Added appearance settings model for system, light, and dark theme choices.
+- [x] Added unknown sender settings model for normal, silent, and suppressed notifications.
+- [x] Added privacy and security settings state for notification privacy and local encryption availability.
+- [x] Added clear SMS send failure reason model for user-facing errors.
+- [x] Added dual-SIM selection state model for available SIMs and selected/default SIM.
+- [x] Added user spam correction model for Mark Spam and Mark Not Spam actions.
+- [x] Added spam rule cache state model for latest valid cached rule fallback.
+- [x] Added spam decision details model with score, classification, rule version, and reasons.
+- [x] Added sync cursor model for initial and incremental sync checkpoints.
+- [x] Added encrypted sync record model that keeps SMS body ciphertext separate from minimized metadata.
+- [x] Added desktop SMS relay status model including waiting-for-phone and retryable failure.
+- [x] Added qR pairing session state model with expiry and approval states.
+- [x] Added desktop device list model for paired-device management and revocation UI.
+- [x] Added user-visible sync status model for disabled, pending, syncing, synced, and failed states.
+- [x] Added onboarding step model for default SMS, permissions, sync, and spam rules.
+- [x] Added settings category model in the PRD-required order.
+- [x] Added spam folder UI model with unread count and empty-state text.
+- [x] Added conversation search state model with query, matches, and selected match.
+- [x] Added retryable failed-message action model for conversation rows.
+- [x] Added message status presentation labels for sending, sent, delivered, and failed states.
+- [x] Added conversation UI state model for header, messages, composer, and search.
+- [x] Added conversation message UI model for bubble, timestamp, and status rendering.
 - [ ] Implement encrypted local storage at rest using SQLCipher or Android encrypted file-backed stores.
 - [x] Added SMS composer state reducer for send validation, SIM selection, completion, and retryable failures.
 - [ ] Build full Compose conversation UI and retryable send statuses.
