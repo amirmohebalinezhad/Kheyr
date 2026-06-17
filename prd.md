@@ -130,6 +130,7 @@ Last updated: 2026-06-17
 - [x] Added conversation message UI model for bubble, timestamp, and status rendering.
 - [x] Implement encrypted local storage at rest using SQLCipher or Android encrypted file-backed stores.
 - [x] Added SMS composer state reducer for send validation, SIM selection, completion, and retryable failures.
+- [x] Added sync update applier for downloaded encrypted message and thread deltas.
 - [x] Added sync downloader for incremental server pull using cursor checkpoints.
 - [x] Added sync encryption key store policy for Android Keystore-backed key management.
 - [x] Added SMS import planner for batched existing-message backfill during onboarding.
