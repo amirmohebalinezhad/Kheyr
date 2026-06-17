@@ -1,0 +1,83 @@
+package com.kheyr.sms.sync
+
+import com.kheyr.sms.data.SmsMessage
+import com.kheyr.sms.sync.crypto.SmsBodyEncryptor
+
+interface SyncQueueStore {
+    fun pendingRecords(limit: Int = 100): List<SyncQueueRecord>
+    fun markUploaded(queueIds: List<Long>)
+}
+
+interface SyncApiClient {
+    fun upload(payloads: List<SyncUploadDto>)
+}
+
+fun interface SyncLogger {
+    fun info(message: String)
+}
+
+class SyncUploader(
+    private val settingsProvider: () -> SyncSettings,
+    private val queueStore: SyncQueueStore,
+    private val apiClient: SyncApiClient,
+    private val encryptor: SmsBodyEncryptor,
+    private val logger: SyncLogger = SyncLogger { },
+) {
+    fun uploadPending(limit: Int = 100): Int {
+        val settings = settingsProvider()
+        if (!settings.canUpload) {
+            logger.info("Sync upload skipped because sync is disabled or device is unpaired")
+            return 0
+        }
+
+        val records = queueStore.pendingRecords(limit)
+        val skippedDeletedBackfillIds = records
+            .filterIsInstance<InitialBackfillSyncRecord>()
+            .filter { it.locallyDeletedBeforeSync }
+            .map { it.queueId }
+        val payloads = records.mapNotNull(::toUploadDto)
+        if (payloads.isEmpty()) {
+            if (skippedDeletedBackfillIds.isNotEmpty()) queueStore.markUploaded(skippedDeletedBackfillIds)
+            return 0
+        }
+
+        apiClient.upload(payloads)
+        queueStore.markUploaded(payloads.map { it.queueId } + skippedDeletedBackfillIds)
+        logger.info("Uploaded ${payloads.size} encrypted sync event(s)")
+        return payloads.size
+    }
+
+    private fun toUploadDto(record: SyncQueueRecord): SyncUploadDto? = when (record) {
+        is InitialBackfillSyncRecord -> {
+            if (record.locallyDeletedBeforeSync) null else encryptedMessage(record.queueId, record.message)
+        }
+        is MessageChangeSyncRecord -> encryptedMessage(record.queueId, record.message)
+        is DeleteEventSyncRecord -> SyncUploadDto(record.queueId, DeleteEventDto(record.messageId, record.deletedAt))
+        is SpamStatusSyncRecord -> SyncUploadDto(record.queueId, SpamStatusDto(record.threadId, record.isSpam))
+        is PinnedStatusSyncRecord -> SyncUploadDto(record.queueId, PinnedStatusDto(record.threadId, record.isPinned, record.pinnedAt))
+        is ArchiveStatusSyncRecord -> SyncUploadDto(record.queueId, ArchiveStatusDto(record.threadId, record.isArchived))
+        is NotificationSettingsSyncRecord -> SyncUploadDto(
+            record.queueId,
+            NotificationSettingsDto(
+                threadId = record.settings.threadId,
+                muted = record.settings.muted,
+                customRingtoneUri = record.settings.customRingtoneUri,
+            ),
+        )
+    }
+
+    private fun encryptedMessage(queueId: Long, message: SmsMessage): SyncUploadDto = SyncUploadDto(
+        queueId = queueId,
+        event = EncryptedSmsMessageDto(
+            messageId = message.id,
+            threadId = message.threadId,
+            address = message.address,
+            encryptedBody = encryptor.encryptBody(message.body),
+            timestamp = message.timestamp,
+            direction = message.direction,
+            status = message.status,
+            simSlot = message.simSlot,
+            isSpam = message.isSpam,
+        ),
+    )
+}
