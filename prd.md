@@ -130,6 +130,7 @@ Last updated: 2026-06-17
 - [x] Added conversation message UI model for bubble, timestamp, and status rendering.
 - [x] Implement encrypted local storage at rest using SQLCipher or Android encrypted file-backed stores.
 - [x] Added SMS composer state reducer for send validation, SIM selection, completion, and retryable failures.
+- [x] Added thread reminder state model with due date and local notification trigger.
 - [x] Added scheduled SMS request model with recipient, body, SIM, and trigger timestamp.
 - [x] Added SMS failure recovery planner suggesting retry, SIM switch, or user guidance.
 - [x] Added background sync scheduler policy for WorkManager upload and pull cadence.
