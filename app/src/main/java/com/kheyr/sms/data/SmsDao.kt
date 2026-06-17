@@ -82,6 +82,18 @@ interface SmsDao {
     """)
     fun archivedThreads(): List<ThreadWithLatestMessage>
 
+    @Query("SELECT * FROM messages WHERE threadId = :threadId ORDER BY timestamp ASC, id ASC")
+    fun messagesForThread(threadId: Long): List<SmsMessageEntity>
+
+    @Query("SELECT * FROM messages WHERE body LIKE '%' || :query || '%' OR address LIKE '%' || :query || '%' ORDER BY timestamp DESC, id DESC")
+    fun searchMessages(query: String): List<SmsMessageEntity>
+
+    @Query("SELECT * FROM messages WHERE status = 'Failed' ORDER BY timestamp ASC, id ASC")
+    fun failedOutgoingMessages(): List<SmsMessageEntity>
+
+    @Query("UPDATE messages SET read = 1 WHERE threadId = :threadId AND direction = 'Incoming'")
+    fun markThreadRead(threadId: Long)
+
     @Query("UPDATE thread_state SET isPinned = :isPinned, pinnedAt = :pinnedAt WHERE threadId = :threadId")
     fun updatePinned(threadId: Long, isPinned: Boolean, pinnedAt: Instant?)
 
@@ -91,6 +103,12 @@ interface SmsDao {
     @Query("UPDATE thread_state SET isSpam = :isSpam WHERE threadId = :threadId")
     fun updateSpam(threadId: Long, isSpam: Boolean)
 
+    @Query("UPDATE thread_state SET isMuted = :isMuted WHERE threadId = :threadId")
+    fun updateMuted(threadId: Long, isMuted: Boolean)
+
     @Query("UPDATE messages SET status = :status WHERE id = :messageId")
     fun updateSendStatus(messageId: Long, status: MessageStatus)
+
+    @Query("SELECT * FROM sync_spam_metadata WHERE threadId = :threadId")
+    fun syncSpamMetadata(threadId: Long): SyncSpamMetadataEntity?
 }

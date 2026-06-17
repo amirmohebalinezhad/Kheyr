@@ -18,10 +18,39 @@ Last updated: 2026-06-17
 - [x] Added inbox thread sorting for pinned-first behavior, pin-date ordering, and spam/archive hiding.
 - [x] Added notification settings models for content privacy, unknown senders, ringtone, vibration, and per-thread mute/ringtone overrides.
 - [x] Added GitHub Actions debug APK build artifact for every push, pull request, and manual workflow run.
-- [ ] Persist SMS locally with Room.
-- [ ] Suppress notifications for classified spam in the receiver path.
-- [ ] Implement encrypted local storage and sync upload pipeline.
-- [ ] Build full conversation UI and retryable send statuses.
+- [x] Persisted SMS threads and messages locally with Room entities, DAO inserts, and thread summaries.
+- [x] Added Room-backed conversation message loading sorted chronologically.
+- [x] Added Room-backed message search across SMS body and sender address.
+- [x] Added Room-backed unread clearing for incoming messages in a thread.
+- [x] Added Room-backed failed outgoing message lookup for retry surfaces.
+- [x] Added Room-backed per-thread mute updates for notification overrides.
+- [x] Added Room-backed spam metadata persistence and lookup for sync/classification audits.
+- [x] Suppressed notifications for classified spam in the receiver path.
+- [x] Implemented client-side AES-GCM SMS body encryption for sync upload payloads.
+- [x] Added sync uploader queue handling for initial backfill, changes, deletes, spam, pin, archive, and notification settings events.
+- [x] Added emoji-only conversation presentation helper for bubble-free message rendering.
+- [x] Added notification policy resolver that suppresses spam and blocked senders before notification rendering.
+- [x] Added notification policy support for disabling notifications from unknown senders.
+- [x] Added notification policy support for silent unknown-sender notifications.
+- [x] Added notification privacy handling for sender-only and hidden-content modes.
+- [x] Added notification ringtone precedence for thread-specific ringtones over global ringtones.
+- [x] Added notification vibration suppression when a thread or unknown sender is silent.
+- [x] Added desktop pairing data models for QR pairing payloads and paired device revocation.
+- [x] Added desktop platform model covering Windows, macOS, and Linux.
+- [x] Added desktop SMS send gate that forwards valid requests only when the Android phone is online.
+- [x] Added desktop send validation for revoked devices, missing recipients, and empty message bodies.
+- [x] Added anonymous spam feedback payloads for user Mark Spam and Mark Not Spam corrections.
+- [x] Added spam rule update validation for newer server-managed global rule payloads.
+- [x] Added salted phone identifier hashing for minimized sync metadata.
+- [x] Added SIM routing policy for per-thread defaults, global defaults, and user selection fallback.
+- [x] Added main drawer model with PRD-required navigation item order.
+- [x] Added thread row presentation mapping for unread, pinned, muted, SIM, and spam badges.
+- [x] Added retry policy for failed outgoing SMS send attempts.
+- [x] Added initial sync backfill planner that skips history deleted before sync opt-in.
+- [x] Added conversation header model for contact title, SIM indicator, call, info, and search actions.
+- [ ] Implement encrypted local storage at rest using SQLCipher or Android encrypted file-backed stores.
+- [x] Added SMS composer state reducer for send validation, SIM selection, completion, and retryable failures.
+- [ ] Build full Compose conversation UI and retryable send statuses.
 
 ---
 
