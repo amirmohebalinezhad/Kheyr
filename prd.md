@@ -130,6 +130,7 @@ Last updated: 2026-06-17
 - [x] Added conversation message UI model for bubble, timestamp, and status rendering.
 - [x] Implement encrypted local storage at rest using SQLCipher or Android encrypted file-backed stores.
 - [x] Added SMS composer state reducer for send validation, SIM selection, completion, and retryable failures.
+- [x] Added dual SIM settings model exposing global default and per-thread override summary.
 - [x] Added pairing approval state machine for QR scan and desktop credential handoff.
 - [x] Added sync retry policy with exponential backoff for failed upload and download.
 - [x] Added realtime connection state model for WebSocket sync and desktop relay push.
