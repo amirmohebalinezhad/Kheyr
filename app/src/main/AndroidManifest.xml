@@ -39,6 +39,15 @@
             </intent-filter>
         </receiver>
 
+        <receiver
+            android:name=".receiver.SmsSendStatusReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.kheyr.sms.action.SMS_SENT" />
+                <action android:name="com.kheyr.sms.action.SMS_DELIVERED" />
+            </intent-filter>
+        </receiver>
+
         <service
             android:name=".service.HeadlessSmsSendService"
             android:exported="true"

@@ -12,6 +12,7 @@ data class SmsSendRequest(
     val recipient: String,
     val body: String,
     val subscriptionId: Int? = null,
+    val messageId: Long? = null,
 )
 
 data class SmsSendResult(
