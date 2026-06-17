@@ -130,6 +130,7 @@ Last updated: 2026-06-17
 - [x] Added conversation message UI model for bubble, timestamp, and status rendering.
 - [x] Implement encrypted local storage at rest using SQLCipher or Android encrypted file-backed stores.
 - [x] Added SMS composer state reducer for send validation, SIM selection, completion, and retryable failures.
+- [x] Added desktop relay queue expiry policy for stale unsent relay requests.
 - [x] Added desktop relay request handler model for incoming desktop SMS send requests.
 - [x] Added spam rule downloader for fetching and validating latest global spam rules.
 - [x] Added message frequency scorer for repeated-sender spam rule evaluation.
