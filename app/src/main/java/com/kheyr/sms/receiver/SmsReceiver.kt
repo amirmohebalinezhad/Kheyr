@@ -15,7 +15,6 @@ import android.telephony.SmsMessage
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import com.kheyr.sms.MainActivity
-import com.kheyr.sms.R
 import com.kheyr.sms.domain.SpamRule
 import com.kheyr.sms.domain.SpamRuleSet
 import com.kheyr.sms.domain.SpamRuleType
@@ -126,7 +125,7 @@ private class AndroidIncomingSmsNotifier(private val context: Context) : Incomin
         val intent = Intent(context, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(context, 0, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
+            .setSmallIcon(android.R.drawable.sym_action_chat)
             .setContentTitle(message.sender)
             .setContentText(message.body)
             .setContentIntent(pendingIntent)
