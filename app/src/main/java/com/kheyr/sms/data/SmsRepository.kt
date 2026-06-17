@@ -5,20 +5,22 @@ import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
 import android.provider.Telephony
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import java.time.Instant
 
 class SmsRepository(
     private val context: Context,
     private val smsDao: SmsDao = AppDatabase.getInstance(context).smsDao(),
 ) {
-    fun loadThreads(): List<SmsThread> {
+    suspend fun loadThreads(): List<SmsThread> = withContext(Dispatchers.IO) {
         syncTelephonyMessages()
-        return smsDao.inboxThreads().map { it.toModel() }
+        smsDao.inboxThreads().map { it.toModel() }
     }
 
-    fun loadSpamThreads(): List<SmsThread> = smsDao.spamThreads().map { it.toModel() }
+    suspend fun loadSpamThreads(): List<SmsThread> = withContext(Dispatchers.IO) { smsDao.spamThreads().map { it.toModel() } }
 
-    fun loadArchivedThreads(): List<SmsThread> = smsDao.archivedThreads().map { it.toModel() }
+    suspend fun loadArchivedThreads(): List<SmsThread> = withContext(Dispatchers.IO) { smsDao.archivedThreads().map { it.toModel() } }
 
     fun insertIncomingSms(
         threadId: Long,
@@ -72,6 +74,7 @@ class SmsRepository(
     fun updateSendStatus(messageId: Long, status: MessageStatus) = smsDao.updateSendStatus(messageId, status)
 
     private fun syncTelephonyMessages() {
+        val newestSyncedId = smsDao.latestSyncedTelephonyId()
         val projection = arrayOf(
             Telephony.Sms._ID,
             Telephony.Sms.THREAD_ID,
@@ -83,7 +86,13 @@ class SmsRepository(
             Telephony.Sms.STATUS,
             SUBSCRIPTION_ID,
         )
-        context.contentResolver.query(Telephony.Sms.CONTENT_URI, projection, null, null, "date ASC")?.use { cursor ->
+        context.contentResolver.query(
+            Telephony.Sms.CONTENT_URI,
+            projection,
+            "${Telephony.Sms._ID} > ?",
+            arrayOf(newestSyncedId.toString()),
+            "${Telephony.Sms._ID} ASC",
+        )?.use { cursor ->
             val id = cursor.getColumnIndexOrThrow(Telephony.Sms._ID)
             val thread = cursor.getColumnIndexOrThrow(Telephony.Sms.THREAD_ID)
             val address = cursor.getColumnIndexOrThrow(Telephony.Sms.ADDRESS)
@@ -92,6 +101,7 @@ class SmsRepository(
             val read = cursor.getColumnIndexOrThrow(Telephony.Sms.READ)
             val subId = cursor.getColumnIndex(SUBSCRIPTION_ID)
             val type = cursor.getColumnIndexOrThrow(Telephony.Sms.TYPE)
+            val messages = mutableListOf<SmsMessageEntity>()
             while (cursor.moveToNext()) {
                 val messageType = cursor.getInt(type)
                 val direction = if (messageType == Telephony.Sms.MESSAGE_TYPE_SENT || messageType == Telephony.Sms.MESSAGE_TYPE_OUTBOX) {
@@ -105,24 +115,29 @@ class SmsRepository(
                     Telephony.Sms.MESSAGE_TYPE_OUTBOX -> MessageStatus.Sending
                     else -> MessageStatus.Received
                 }
-                smsDao.insertSms(
-                    SmsMessageEntity(
-                        telephonyId = cursor.getLong(id),
-                        threadId = cursor.getLong(thread),
-                        address = cursor.getString(address).orEmpty(),
-                        simSlot = cursor.intOrNull(subId),
-                        body = cursor.getString(body).orEmpty(),
-                        timestamp = Instant.ofEpochMilli(cursor.getLong(date)),
-                        direction = direction,
-                        status = status,
-                        read = cursor.getInt(read) != 0 || direction == MessageDirection.Outgoing,
-                    )
+                messages += SmsMessageEntity(
+                    telephonyId = cursor.getLong(id),
+                    threadId = cursor.getLong(thread),
+                    address = cursor.getString(address).orEmpty(),
+                    simSlot = cursor.intOrNull(subId),
+                    body = cursor.getString(body).orEmpty(),
+                    timestamp = Instant.ofEpochMilli(cursor.getLong(date)),
+                    direction = direction,
+                    status = status,
+                    read = cursor.getInt(read) != 0 || direction == MessageDirection.Outgoing,
                 )
+                if (messages.size == SYNC_INSERT_BATCH_SIZE) {
+                    smsDao.insertSmsBatch(messages)
+                    messages.clear()
+                }
+            }
+            if (messages.isNotEmpty()) {
+                smsDao.insertSmsBatch(messages)
             }
         }
     }
 
-    fun loadMessages(threadId: Long): List<SmsMessage> {
+    suspend fun loadMessages(threadId: Long): List<SmsMessage> = withContext(Dispatchers.IO) {
         val projection = arrayOf(
             Telephony.Sms._ID,
             Telephony.Sms.THREAD_ID,
@@ -133,7 +148,7 @@ class SmsRepository(
             Telephony.Sms.STATUS,
             SUBSCRIPTION_ID,
         )
-        return context.contentResolver.query(
+        context.contentResolver.query(
             Telephony.Sms.CONTENT_URI,
             projection,
             "${Telephony.Sms.THREAD_ID} = ?",
@@ -168,7 +183,7 @@ class SmsRepository(
         }.orEmpty()
     }
 
-    fun persistOutgoing(recipient: String, body: String, subscriptionId: Int?): Long {
+    suspend fun persistOutgoing(recipient: String, body: String, subscriptionId: Int?): Long = withContext(Dispatchers.IO) {
         val values = ContentValues().apply {
             put(Telephony.Sms.ADDRESS, recipient)
             put(Telephony.Sms.BODY, body)
@@ -179,11 +194,11 @@ class SmsRepository(
             put(Telephony.Sms.STATUS, Telephony.Sms.STATUS_PENDING)
             subscriptionId?.let { put(SUBSCRIPTION_ID, it) }
         }
-        return context.contentResolver.insert(Telephony.Sms.CONTENT_URI, values)?.let(ContentUris::parseId)
+        context.contentResolver.insert(Telephony.Sms.CONTENT_URI, values)?.let(ContentUris::parseId)
             ?: error("Unable to persist outgoing SMS")
     }
 
-    fun markSending(messageId: Long) = updateMessage(messageId, Telephony.Sms.MESSAGE_TYPE_OUTBOX, Telephony.Sms.STATUS_PENDING)
+    suspend fun markSending(messageId: Long) = withContext(Dispatchers.IO) { updateMessage(messageId, Telephony.Sms.MESSAGE_TYPE_OUTBOX, Telephony.Sms.STATUS_PENDING) }
 
     fun markSent(messageId: Long) = updateMessage(messageId, Telephony.Sms.MESSAGE_TYPE_SENT, Telephony.Sms.STATUS_NONE)
 
@@ -213,6 +228,7 @@ class SmsRepository(
 
     companion object {
         private const val SUBSCRIPTION_ID = "sub_id"
+        private const val SYNC_INSERT_BATCH_SIZE = 500
     }
     private fun ThreadWithLatestMessage.toModel() = SmsThread(
         id = id,
