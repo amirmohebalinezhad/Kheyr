@@ -146,6 +146,17 @@ interface SmsDao {
     @Query("UPDATE messages SET status = :status WHERE id = :messageId")
     fun updateSendStatus(messageId: Long, status: MessageStatus)
 
+    @Query("UPDATE messages SET status = :status WHERE telephonyId = :telephonyId")
+    fun updateSendStatusByTelephonyId(telephonyId: Long, status: MessageStatus)
+
+    @Query("""
+        SELECT telephonyId FROM messages
+        WHERE telephonyId IS NOT NULL AND direction = 'Outgoing' AND status != 'Delivered'
+        ORDER BY timestamp DESC
+        LIMIT :limit
+    """)
+    fun recentOutgoingTelephonyIds(limit: Int): List<Long>
+
     @Query("SELECT * FROM messages WHERE telephonyId = :telephonyId LIMIT 1")
     fun messageByTelephonyId(telephonyId: Long): SmsMessageEntity?
 

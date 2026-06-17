@@ -19,6 +19,12 @@ class SmsRepository(
 
     suspend fun syncTelephonyMessages() = withContext(Dispatchers.IO) {
         syncNewTelephonyMessages()
+        refreshRecentOutgoingMessages()
+    }
+
+    suspend fun syncTelephonyMessagesByIds(telephonyIds: List<Long>) = withContext(Dispatchers.IO) {
+        if (telephonyIds.isEmpty()) return@withContext
+        syncTelephonyMessages(telephonyIds = telephonyIds)
     }
 
     suspend fun loadPinnedThreads(): List<SmsThread> = withContext(Dispatchers.IO) { smsDao.pinnedThreads().map { it.toModel() } }
@@ -88,6 +94,12 @@ class SmsRepository(
 
     private fun syncNewTelephonyMessages() {
         syncTelephonyMessages(newerThanId = smsDao.latestSyncedTelephonyId())
+    }
+
+    private fun refreshRecentOutgoingMessages() {
+        smsDao.recentOutgoingTelephonyIds(RECENT_OUTGOING_REFRESH_LIMIT)
+            .chunked(RECENT_OUTGOING_REFRESH_BATCH_SIZE)
+            .forEach { ids -> syncTelephonyMessages(telephonyIds = ids) }
     }
 
     private fun syncTelephonyMessages(newerThanId: Long? = null, telephonyIds: List<Long>? = null) {
@@ -244,13 +256,25 @@ class SmsRepository(
             ?: error("Unable to persist outgoing SMS")
     }
 
-    suspend fun markSending(messageId: Long) = withContext(Dispatchers.IO) { updateMessage(messageId, Telephony.Sms.MESSAGE_TYPE_OUTBOX, Telephony.Sms.STATUS_PENDING) }
+    suspend fun markSending(telephonyId: Long) = withContext(Dispatchers.IO) {
+        updateMessage(telephonyId, Telephony.Sms.MESSAGE_TYPE_OUTBOX, Telephony.Sms.STATUS_PENDING)
+        smsDao.updateSendStatusByTelephonyId(telephonyId, MessageStatus.Sending)
+    }
 
-    fun markSent(messageId: Long) = updateMessage(messageId, Telephony.Sms.MESSAGE_TYPE_SENT, Telephony.Sms.STATUS_NONE)
+    fun markSent(telephonyId: Long) {
+        updateMessage(telephonyId, Telephony.Sms.MESSAGE_TYPE_SENT, Telephony.Sms.STATUS_NONE)
+        smsDao.updateSendStatusByTelephonyId(telephonyId, MessageStatus.Sent)
+    }
 
-    fun markDelivered(messageId: Long) = updateMessage(messageId, Telephony.Sms.MESSAGE_TYPE_SENT, Telephony.Sms.STATUS_COMPLETE)
+    fun markDelivered(telephonyId: Long) {
+        updateMessage(telephonyId, Telephony.Sms.MESSAGE_TYPE_SENT, Telephony.Sms.STATUS_COMPLETE)
+        smsDao.updateSendStatusByTelephonyId(telephonyId, MessageStatus.Delivered)
+    }
 
-    fun markFailed(messageId: Long) = updateMessage(messageId, Telephony.Sms.MESSAGE_TYPE_FAILED, Telephony.Sms.STATUS_FAILED)
+    fun markFailed(telephonyId: Long) {
+        updateMessage(telephonyId, Telephony.Sms.MESSAGE_TYPE_FAILED, Telephony.Sms.STATUS_FAILED)
+        smsDao.updateSendStatusByTelephonyId(telephonyId, MessageStatus.Failed)
+    }
 
     private fun updateMessage(messageId: Long, type: Int, status: Int) {
         val values = ContentValues().apply {
@@ -275,6 +299,8 @@ class SmsRepository(
     companion object {
         private const val SUBSCRIPTION_ID = "sub_id"
         private const val SYNC_INSERT_BATCH_SIZE = 500
+        private const val RECENT_OUTGOING_REFRESH_LIMIT = 50
+        private const val RECENT_OUTGOING_REFRESH_BATCH_SIZE = 25
     }
     private fun SmsMessageEntity.toModel() = SmsMessage(
         id = id,
@@ -285,6 +311,7 @@ class SmsRepository(
         direction = direction,
         status = status,
         simSlot = simSlot,
+        telephonyId = telephonyId,
     )
 
     private fun ThreadWithLatestMessage.toModel() = SmsThread(

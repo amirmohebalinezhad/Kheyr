@@ -26,6 +26,7 @@ data class SmsMessage(
     val direction: MessageDirection,
     val status: MessageStatus,
     val simSlot: Int? = null,
+    val telephonyId: Long? = null,
     val isSpam: Boolean = false,
 )
 

@@ -454,9 +454,10 @@ fun KheyrAppShell() {
                                     if (state.error != null) return@ConversationScreenContent
                                     val text = state.body.trim()
                                     scope.launch {
-                                        val messageId = repository.persistOutgoing(thread.address, text, state.selectedSubscriptionId)
-                                        repository.markSending(messageId)
-                                        sender.send(SmsSendRequest(thread.address, text, state.selectedSubscriptionId, messageId))
+                                        val telephonyId = repository.persistOutgoing(thread.address, text, state.selectedSubscriptionId)
+                                        repository.markSending(telephonyId)
+                                        repository.syncTelephonyMessagesByIds(listOf(telephonyId))
+                                        sender.send(SmsSendRequest(thread.address, text, state.selectedSubscriptionId, telephonyId))
                                         composerState = composerReducer.reduce(state, SmsComposerEvent.SendCompleted)
                                         messages = repository.loadLocalMessages(thread.id)
                                         refreshThreadsLocal()
@@ -464,9 +465,11 @@ fun KheyrAppShell() {
                                 },
                                 onRetry = { messageId ->
                                     val message = messages.firstOrNull { it.id == messageId } ?: return@ConversationScreenContent
+                                    val telephonyId = message.telephonyId ?: return@ConversationScreenContent
                                     scope.launch {
-                                        repository.markSending(message.id)
-                                        sender.send(SmsSendRequest(message.address, message.body, message.simSlot, message.id))
+                                        repository.markSending(telephonyId)
+                                        sender.send(SmsSendRequest(message.address, message.body, message.simSlot, telephonyId))
+                                        repository.syncTelephonyMessagesByIds(listOf(telephonyId))
                                         messages = repository.loadLocalMessages(thread.id)
                                     }
                                 },
