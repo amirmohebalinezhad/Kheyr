@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import com.kheyr.sms.data.MessageDirection
 import com.kheyr.sms.data.MessageStatus
 import com.kheyr.sms.data.SmsMessage
@@ -49,16 +50,20 @@ fun KheyrApp() {
     val repository = remember { SmsRepository(context) }
     val simRepository = remember { SimRepository(context) }
     val sender = remember { SmsSender(context) }
+    val coroutineScope = rememberCoroutineScope()
     var threads by remember { mutableStateOf<List<SmsThread>>(emptyList()) }
     var selectedThread by remember { mutableStateOf<SmsThread?>(null) }
     var messages by remember { mutableStateOf<List<SmsMessage>>(emptyList()) }
     var isDefaultSms by remember { mutableStateOf(Telephony.Sms.getDefaultSmsPackage(context) == context.packageName) }
     var sims by remember { mutableStateOf<List<SimCard>>(emptyList()) }
-    val refreshThreads = {
-        threads = repository.loadThreads()
-        selectedThread?.let { current ->
-            messages = repository.loadMessages(current.id)
-            selectedThread = threads.firstOrNull { it.id == current.id } ?: current
+    fun refreshThreads() {
+        coroutineScope.launch {
+            val loadedThreads = repository.loadThreads()
+            threads = loadedThreads
+            selectedThread?.let { current ->
+                messages = repository.loadMessages(current.id)
+                selectedThread = loadedThreads.firstOrNull { it.id == current.id } ?: current
+            }
         }
     }
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -110,7 +115,9 @@ fun KheyrApp() {
                     }
                     ThreadList(threads = threads, onThreadSelected = { thread ->
                         selectedThread = thread
-                        messages = repository.loadMessages(thread.id)
+                        coroutineScope.launch {
+                            messages = repository.loadMessages(thread.id)
+                        }
                     })
                 } else {
                     ConversationScreen(
@@ -119,15 +126,19 @@ fun KheyrApp() {
                         sims = sims,
                         onRefresh = { refreshThreads() },
                         onSend = { recipient, body, subscriptionId ->
-                            val messageId = repository.persistOutgoing(recipient, body, subscriptionId)
-                            repository.markSending(messageId)
-                            sender.send(SmsSendRequest(recipient, body, subscriptionId, messageId))
-                            refreshThreads()
+                            coroutineScope.launch {
+                                val messageId = repository.persistOutgoing(recipient, body, subscriptionId)
+                                repository.markSending(messageId)
+                                sender.send(SmsSendRequest(recipient, body, subscriptionId, messageId))
+                                refreshThreads()
+                            }
                         },
                         onRetry = { message ->
-                            repository.markSending(message.id)
-                            sender.send(SmsSendRequest(message.address, message.body, message.simSlot, message.id))
-                            refreshThreads()
+                            coroutineScope.launch {
+                                repository.markSending(message.id)
+                                sender.send(SmsSendRequest(message.address, message.body, message.simSlot, message.id))
+                                refreshThreads()
+                            }
                         },
                     )
                 }
@@ -158,11 +169,12 @@ private fun DefaultSmsCard(onRequestDefault: () -> Unit) {
 
 @Composable
 private fun ThreadList(threads: List<SmsThread>, onThreadSelected: (SmsThread) -> Unit) {
-    if (threads.isEmpty()) {
+    val inboxThreads = remember(threads) { ThreadSorter.inboxThreads(threads) }
+    if (inboxThreads.isEmpty()) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Grant SMS access to load conversations") }
     } else {
         LazyColumn {
-            items(ThreadSorter.inboxThreads(threads), key = { it.id }) { thread ->
+            items(inboxThreads, key = { it.id }, contentType = { "thread" }) { thread ->
                 ListItem(
                     headlineContent = { Text(thread.displayName.ifBlank { thread.address }) },
                     supportingContent = { Text(thread.lastMessage, maxLines = 1) },
@@ -200,7 +212,7 @@ private fun ConversationScreen(
             contentPadding = PaddingValues(12.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            items(messages, key = { it.id }) { message ->
+            items(messages, key = { it.id }, contentType = { "message" }) { message ->
                 MessageBubble(message = message, onRetry = { onRetry(message) })
             }
         }

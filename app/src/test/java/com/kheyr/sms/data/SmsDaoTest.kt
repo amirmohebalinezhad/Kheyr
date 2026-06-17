@@ -64,6 +64,18 @@ class SmsDaoTest {
         assertEquals(listOf(1L, 2L, 3L), dao.inboxThreads().map { it.id })
     }
 
+
+    @Test fun batchInsertTracksLatestSyncedTelephonyId() {
+        dao.insertSmsBatch(listOf(
+            message(threadId = 1, body = "first", at = "2026-01-01T00:00:00Z").copy(telephonyId = 10),
+            message(threadId = 1, body = "second", at = "2026-01-02T00:00:00Z").copy(telephonyId = 12),
+        ))
+
+        assertEquals(12L, dao.latestSyncedTelephonyId())
+        assertEquals(listOf(1L), dao.inboxThreads().map { it.id })
+        assertEquals("second", dao.inboxThreads().single().lastMessage)
+    }
+
     @Test fun sendStatusCanBeUpdatedAfterOutgoingInsert() {
         val messageId = dao.insertOutgoingSms(message(threadId = 1, direction = MessageDirection.Outgoing, status = MessageStatus.Sending, read = true))
 

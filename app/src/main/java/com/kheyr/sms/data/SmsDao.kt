@@ -34,6 +34,14 @@ interface SmsDao {
         return insertMessage(message)
     }
 
+    @Transaction
+    fun insertSmsBatch(messages: List<SmsMessageEntity>) {
+        messages.forEach { insertSms(it) }
+    }
+
+    @Query("SELECT COALESCE(MAX(telephonyId), 0) FROM messages WHERE telephonyId IS NOT NULL")
+    fun latestSyncedTelephonyId(): Long
+
     @Query("""
         SELECT t.id, t.address, t.displayName, m.body AS lastMessage, m.timestamp AS lastMessageAt,
             SUM(CASE WHEN m.direction = 'Incoming' AND m.read = 0 THEN 1 ELSE 0 END) AS unreadCount,

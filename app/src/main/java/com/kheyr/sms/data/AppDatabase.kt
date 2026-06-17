@@ -21,7 +21,6 @@ abstract class AppDatabase : RoomDatabase() {
         fun getInstance(context: Context): AppDatabase = instance ?: synchronized(this) {
             instance ?: Room.databaseBuilder(context.applicationContext, AppDatabase::class.java, "kheyr_sms.db")
                 .fallbackToDestructiveMigration()
-                .allowMainThreadQueries()
                 .build()
                 .also { instance = it }
         }
