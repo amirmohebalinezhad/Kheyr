@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kheyr SMS — Interactive Demo</title>
+  <style>
+    :root {
+      --primary: #0f8b8d;
+      --primary-container: #b8ecec;
+      --surface: #f7fafa;
+      --surface-variant: #e8f0f0;
+      --on-surface: #1a2c2c;
+      --muted: #5c6f6f;
+      --bubble-out: #d4f0f0;
+      --bubble-in: #ffffff;
+      --danger: #c62828;
+      --shadow: 0 2px 12px rgba(15, 139, 141, 0.12);
+      --radius: 18px;
+      --font: "Segoe UI", system-ui, -apple-system, sans-serif;
+    }
+    [data-theme="dark"] {
+      --primary: #4dd8da;
+      --primary-container: #0d4f50;
+      --surface: #101818;
+      --surface-variant: #1c2828;
+      --on-surface: #e4f0f0;
+      --muted: #8aa0a0;
+      --bubble-out: #0d4f50;
+      --bubble-in: #243030;
+      --shadow: 0 2px 16px rgba(0, 0, 0, 0.45);
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: var(--font);
+      background: linear-gradient(135deg, #0a3d3e 0%, #0f8b8d 50%, #1a5c5d 100%);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      color: var(--on-surface);
+    }
+    .demo-shell {
+      display: grid;
+      grid-template-columns: 280px 1fr 300px;
+      gap: 20px;
+      max-width: 1200px;
+      width: 100%;
+      align-items: start;
+    }
+    .panel {
+      background: var(--surface);
+      border-radius: 20px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .panel-header {
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--surface-variant);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .panel-header h2 { font-size: 15px; font-weight: 700; }
+    .badge {
+      background: var(--primary);
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 999px;
+    }
+    [data-theme="dark"] .badge { color: #0a2020; }
+    .phone {
+      width: 390px;
+      max-width: 100%;
+      margin: 0 auto;
+      background: var(--surface);
+      border-radius: 32px;
+      box-shadow: 0 24px 60px rgba(0,0,0,0.35);
+      overflow: hidden;
+      border: 6px solid #1a2c2c;
+    }
+    .status-bar {
+      background: var(--primary);
+      color: #fff;
+      padding: 10px 18px 6px;
+      font-size: 12px;
+      display: flex;
+      justify-content: space-between;
+    }
+    [data-theme="dark"] .status-bar { color: #0a2020; }
+    .app-bar {
+      background: var(--primary);
+      color: #fff;
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    [data-theme="dark"] .app-bar { color: #0a2020; }
+    .app-bar h1 { font-size: 18px; font-weight: 700; flex: 1; }
+    .icon-btn {
+      background: rgba(255,255,255,0.18);
+      border: none;
+      color: inherit;
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 16px;
+      display: grid;
+      place-items: center;
+    }
+    .drawer {
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0.45);
+      z-index: 10;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+    }
+    .drawer.open { opacity: 1; pointer-events: auto; }
+    .drawer-panel {
+      width: 260px;
+      height: 100%;
+      background: var(--surface);
+      padding: 20px 0;
+      transform: translateX(-100%);
+      transition: transform 0.25s ease;
+    }
+    .drawer.open .drawer-panel { transform: translateX(0); }
+    .drawer-item {
+      padding: 14px 22px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 15px;
+    }
+    .drawer-item:hover, .drawer-item.active { background: var(--surface-variant); }
+    .drawer-item .count {
+      margin-left: auto;
+      background: var(--danger);
+      color: #fff;
+      font-size: 11px;
+      padding: 1px 7px;
+      border-radius: 999px;
+    }
+    .screen { position: relative; min-height: 620px; display: flex; flex-direction: column; }
+    .thread-list { flex: 1; overflow-y: auto; }
+    .thread {
+      padding: 14px 16px;
+      border-bottom: 1px solid var(--surface-variant);
+      cursor: pointer;
+      display: grid;
+      grid-template-columns: 44px 1fr auto;
+      gap: 10px;
+      align-items: center;
+    }
+    .thread:hover { background: var(--surface-variant); }
+    .avatar {
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: var(--primary-container);
+      color: var(--primary);
+      display: grid;
+      place-items: center;
+      font-weight: 700;
+      font-size: 16px;
+    }
+    .thread-body .name { font-weight: 600; font-size: 15px; }
+    .thread-body .preview { color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+    .thread-meta { text-align: right; font-size: 11px; color: var(--muted); }
+    .thread-meta .unread {
+      background: var(--primary);
+      color: #fff;
+      border-radius: 999px;
+      padding: 2px 7px;
+      font-weight: 700;
+      margin-top: 4px;
+      display: inline-block;
+    }
+    [data-theme="dark"] .thread-meta .unread { color: #0a2020; }
+    .icons { display: flex; gap: 4px; margin-top: 4px; justify-content: flex-end; font-size: 12px; }
+    .conversation { flex: 1; overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; background: var(--surface); }
+    .msg-row { display: flex; }
+    .msg-row.out { justify-content: flex-end; }
+    .msg-row.in { justify-content: flex-start; }
+    .bubble {
+      max-width: 78%;
+      padding: 10px 14px;
+      border-radius: var(--radius);
+      font-size: 14px;
+      line-height: 1.45;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    .bubble.out { background: var(--bubble-out); border-bottom-right-radius: 4px; }
+    .bubble.in { background: var(--bubble-in); border-bottom-left-radius: 4px; }
+    .emoji-only { font-size: 36px; padding: 4px 8px; box-shadow: none; background: transparent; }
+    .meta { font-size: 11px; color: var(--muted); margin-top: 4px; }
+    .retry-btn {
+      margin-top: 6px;
+      background: none;
+      border: none;
+      color: var(--danger);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      padding: 0;
+    }
+    .composer {
+      border-top: 1px solid var(--surface-variant);
+      padding: 12px;
+      background: var(--surface-variant);
+    }
+    .sim-chips { display: flex; gap: 8px; margin-bottom: 10px; }
+    .chip {
+      padding: 6px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--primary);
+      background: transparent;
+      color: var(--primary);
+      font-size: 12px;
+      cursor: pointer;
+    }
+    .chip.selected { background: var(--primary); color: #fff; }
+    [data-theme="dark"] .chip.selected { color: #0a2020; }
+    .composer-row { display: flex; gap: 8px; }
+    .composer-row input {
+      flex: 1;
+      border: 1px solid var(--surface-variant);
+      border-radius: 24px;
+      padding: 10px 16px;
+      background: var(--surface);
+      color: var(--on-surface);
+      font-size: 14px;
+    }
+    .send-btn {
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      border-radius: 24px;
+      padding: 10px 18px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    [data-theme="dark"] .send-btn { color: #0a2020; }
+    .fab {
+      position: absolute;
+      bottom: 80px;
+      right: 18px;
+      width: 52px;
+      height: 52px;
+      border-radius: 50%;
+      background: var(--primary);
+      color: #fff;
+      border: none;
+      font-size: 28px;
+      cursor: pointer;
+      box-shadow: var(--shadow);
+    }
+    [data-theme="dark"] .fab { color: #0a2020; }
+    .feature-list { padding: 12px 16px 20px; }
+    .feature-list li {
+      list-style: none;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--surface-variant);
+      font-size: 13px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .feature-list li::before { content: "✓"; color: var(--primary); font-weight: 700; }
+    .log {
+      padding: 12px 16px 20px;
+      font-family: ui-monospace, monospace;
+      font-size: 11px;
+      line-height: 1.6;
+      color: var(--muted);
+      max-height: 560px;
+      overflow-y: auto;
+    }
+    .log .event { color: var(--primary); font-weight: 600; }
+    .hidden { display: none !important; }
+    .spam-banner {
+      background: #fff3e0;
+      color: #e65100;
+      padding: 8px 16px;
+      font-size: 12px;
+      text-align: center;
+    }
+    [data-theme="dark"] .spam-banner { background: #3e2723; color: #ffab40; }
+    @media (max-width: 1100px) {
+      .demo-shell { grid-template-columns: 1fr; justify-items: center; }
+      .side-panels { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; width: 100%; max-width: 720px; }
+    }
+    @media (max-width: 720px) {
+      .side-panels { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body data-theme="light">
+  <div class="demo-shell">
+    <div class="side-panels" style="display:contents">
+      <div class="panel">
+        <div class="panel-header">
+          <h2>Features demonstrated</h2>
+          <span class="badge">50 tasks</span>
+        </div>
+        <ul class="feature-list" id="features"></ul>
+      </div>
+
+      <div class="phone" id="phone">
+        <div class="status-bar"><span>9:41</span><span>LTE · 87%</span></div>
+        <div class="app-bar">
+          <button class="icon-btn" id="menuBtn" title="Open drawer">☰</button>
+          <h1 id="screenTitle">All Messages</h1>
+          <button class="icon-btn" id="themeBtn" title="Toggle theme">🌙</button>
+        </div>
+        <div class="screen" id="screen">
+          <div class="drawer" id="drawer">
+            <div class="drawer-panel" id="drawerPanel"></div>
+          </div>
+          <div id="spamBanner" class="spam-banner hidden">Spam folder — notifications suppressed</div>
+          <div class="thread-list" id="threadList"></div>
+          <div class="conversation hidden" id="conversation"></div>
+          <button class="fab hidden" id="fab">+</button>
+          <div class="composer hidden" id="composer">
+            <div class="sim-chips" id="simChips"></div>
+            <div class="composer-row">
+              <input id="msgInput" placeholder="Message" />
+              <button class="send-btn" id="sendBtn">Send</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header"><h2>Live event log</h2></div>
+        <div class="log" id="log"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const FEATURES = [
+      "Encrypted SQLCipher local storage",
+      "Compose conversation UI with bubbles",
+      "Emoji-only messages (no bubble)",
+      "Retryable failed send status",
+      "Dual SIM chip selector",
+      "Pinned-first thread sorting",
+      "Spam folder with badge count",
+      "Drawer navigation (PRD order)",
+      "On-device spam scoring",
+      "Client-encrypted sync models",
+      "Desktop SMS relay status",
+      "Direct message Phase 2 stubs",
+    ];
+
+    const SIMS = [
+      { id: 1, label: "SIM 1 · Work" },
+      { id: 2, label: "SIM 2 · Personal" },
+    ];
+
+    const THREADS = [
+      { id: 1, name: "Alice Chen", address: "+1 555-0101", preview: "See you at 3pm!", time: "2:14 PM", unread: 2, pinned: true, muted: false, sim: 1, spam: false },
+      { id: 2, name: "Bank Alerts", address: "+1 555-0199", preview: "Your OTP is 482910", time: "1:02 PM", unread: 0, pinned: false, muted: false, sim: 2, spam: false },
+      { id: 3, name: "+1 555-8877", address: "+1 555-8877", preview: "WINNER! Claim prize now", time: "11:30 AM", unread: 1, pinned: false, muted: false, sim: 1, spam: true },
+      { id: 4, name: "Mom", address: "+1 555-0142", preview: "🎉🎂❤️", time: "Yesterday", unread: 0, pinned: false, muted: true, sim: 2, spam: false },
+    ];
+
+    const MESSAGES = {
+      1: [
+        { dir: "in", body: "Hey! Are we still on for coffee?", time: "1:58 PM", status: "Delivered" },
+        { dir: "out", body: "Yes! See you at 3pm", time: "2:01 PM", status: "Sent" },
+        { dir: "in", body: "See you at 3pm!", time: "2:14 PM", status: "Delivered" },
+      ],
+      2: [
+        { dir: "in", body: "Your one-time password is 482910. Do not share.", time: "1:02 PM", status: "Delivered", otp: true },
+      ],
+      3: [
+        { dir: "in", body: "CONGRATS! You won $1,000,000. Click http://scam.example", time: "11:30 AM", status: "Delivered", spam: true },
+      ],
+      4: [
+        { dir: "in", body: "Happy birthday sweetie!", time: "Yesterday", status: "Delivered" },
+        { dir: "in", body: "🎉🎂❤️", time: "Yesterday", status: "Delivered", emoji: true },
+        { dir: "out", body: "Thanks mom!!", time: "Yesterday", status: "Failed", failed: true },
+      ],
+    };
+
+    const DRAWER = [
+      { id: "inbox", label: "All Messages", icon: "💬" },
+      { id: "spam", label: "Spam", icon: "🛡️", count: 1 },
+      { id: "archived", label: "Archived", icon: "📦" },
+      { id: "pinned", label: "Pinned", icon: "📌" },
+      { id: "contacts", label: "Contacts", icon: "👤" },
+      { id: "sync", label: "Desktop Sync", icon: "🖥️" },
+      { id: "settings", label: "Settings", icon: "⚙️" },
+      { id: "help", label: "Help & Feedback", icon: "❓" },
+    ];
+
+    let state = { folder: "inbox", thread: null, sim: 1, theme: "light" };
+
+    const $ = (id) => document.getElementById(id);
+
+    function log(msg) {
+      const el = $("log");
+      const line = document.createElement("div");
+      const ts = new Date().toLocaleTimeString();
+      line.innerHTML = `<span class="event">[${ts}]</span> ${msg}`;
+      el.prepend(line);
+    }
+
+    function isEmojiOnly(text) {
+      return /^[\p{Emoji}\p{Emoji_Modifier}\p{Emoji_Component}\s]+$/u.test(text.trim()) && text.trim().length > 0;
+    }
+
+    function renderFeatures() {
+      $("features").innerHTML = FEATURES.map((f) => `<li>${f}</li>`).join("");
+    }
+
+    function renderDrawer() {
+      $("drawerPanel").innerHTML = DRAWER.map((d) =>
+        `<div class="drawer-item ${state.folder === d.id ? "active" : ""}" data-folder="${d.id}">
+          <span>${d.icon}</span><span>${d.label}</span>${d.count ? `<span class="count">${d.count}</span>` : ""}
+        </div>`
+      ).join("");
+      $("drawerPanel").querySelectorAll(".drawer-item").forEach((el) => {
+        el.onclick = () => {
+          state.folder = el.dataset.folder;
+          state.thread = null;
+          $("drawer").classList.remove("open");
+          render();
+          log(`Opened drawer folder: <b>${el.textContent.trim()}</b>`);
+        };
+      });
+    }
+
+    function visibleThreads() {
+      let list = [...THREADS];
+      if (state.folder === "spam") list = list.filter((t) => t.spam);
+      else if (state.folder === "pinned") list = list.filter((t) => t.pinned);
+      else if (state.folder === "archived") list = [];
+      else list = list.filter((t) => !t.spam);
+      return list.sort((a, b) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0));
+    }
+
+    function renderThreads() {
+      const threads = visibleThreads();
+      $("threadList").innerHTML = threads.map((t) => `
+        <div class="thread" data-id="${t.id}">
+          <div class="avatar">${t.name.charAt(0)}</div>
+          <div class="thread-body">
+            <div class="name">${t.name}</div>
+            <div class="preview">${t.preview}</div>
+          </div>
+          <div class="thread-meta">
+            <div>${t.time}</div>
+            ${t.unread ? `<div class="unread">${t.unread}</div>` : ""}
+            <div class="icons">${t.pinned ? "📌" : ""}${t.muted ? "🔇" : ""}${t.sim ? `<span>S${t.sim}</span>` : ""}</div>
+          </div>
+        </div>`).join("") || `<div style="padding:40px;text-align:center;color:var(--muted)">No threads in this folder</div>`;
+      $("threadList").querySelectorAll(".thread").forEach((el) => {
+        el.onclick = () => openThread(+el.dataset.id);
+      });
+    }
+
+    function openThread(id) {
+      state.thread = THREADS.find((t) => t.id === id);
+      render();
+      log(`Opened conversation with <b>${state.thread.name}</b>`);
+    }
+
+    function renderConversation() {
+      const msgs = MESSAGES[state.thread.id] || [];
+      $("conversation").innerHTML = msgs.map((m, i) => {
+        const emoji = m.emoji || isEmojiOnly(m.body);
+        const rowClass = m.dir === "out" ? "out" : "in";
+        const bubbleClass = emoji ? "emoji-only" : `bubble ${m.dir === "out" ? "out" : "in"}`;
+        const retry = m.failed ? `<button class="retry-btn" data-retry="${i}">Retry</button>` : "";
+        const spamNote = m.spam ? `<div class="meta" style="color:#e65100">Spam score: 85 · moved to Spam folder</div>` : "";
+        const otpNote = m.otp ? `<div class="meta" style="color:var(--primary)">OTP negative-score rule applied (−40)</div>` : "";
+        return `<div class="msg-row ${rowClass}"><div class="${bubbleClass}">${m.body}<div class="meta">${m.time} · ${m.status}</div>${spamNote}${otpNote}${retry}</div></div>`;
+      }).join("");
+      $("conversation").querySelectorAll(".retry-btn").forEach((btn) => {
+        btn.onclick = () => {
+          log(`Retrying failed message in <b>${state.thread.name}</b> via SIM ${state.sim}`);
+          btn.textContent = "Sending…";
+          setTimeout(() => {
+            btn.textContent = "Sent ✓";
+            btn.style.color = "var(--primary)";
+            log(`Message sent successfully on <b>${SIMS.find(s => s.id === state.sim).label}</b>`);
+          }, 900);
+        };
+      });
+    }
+
+    function renderComposer() {
+      $("simChips").innerHTML = SIMS.map((s) =>
+        `<button class="chip ${state.sim === s.id ? "selected" : ""}" data-sim="${s.id}">${s.label}</button>`
+      ).join("");
+      $("simChips").querySelectorAll(".chip").forEach((chip) => {
+        chip.onclick = () => {
+          state.sim = +chip.dataset.sim;
+          renderComposer();
+          log(`Selected <b>${SIMS.find(s => s.id === state.sim).label}</b> for outgoing SMS`);
+        };
+      });
+    }
+
+    function render() {
+      const inConvo = !!state.thread;
+      const titles = { inbox: "All Messages", spam: "Spam", archived: "Archived", pinned: "Pinned", contacts: "Contacts", sync: "Desktop Sync", settings: "Settings", help: "Help & Feedback" };
+      $("screenTitle").textContent = inConvo ? state.thread.name : (titles[state.folder] || "Kheyr SMS");
+      $("threadList").classList.toggle("hidden", inConvo);
+      $("conversation").classList.toggle("hidden", !inConvo);
+      $("composer").classList.toggle("hidden", !inConvo);
+      $("fab").classList.toggle("hidden", inConvo);
+      $("spamBanner").classList.toggle("hidden", state.folder !== "spam");
+      if (!inConvo) renderThreads();
+      else { renderConversation(); renderComposer(); }
+      renderDrawer();
+    }
+
+    $("menuBtn").onclick = () => { $("drawer").classList.add("open"); log("Opened navigation drawer"); };
+    $("drawer").onclick = (e) => { if (e.target === $("drawer")) $("drawer").classList.remove("open"); };
+    $("themeBtn").onclick = () => {
+      state.theme = state.theme === "light" ? "dark" : "light";
+      document.body.dataset.theme = state.theme;
+      $("themeBtn").textContent = state.theme === "light" ? "🌙" : "☀️";
+      log(`Switched to <b>${state.theme}</b> theme`);
+    };
+    document.querySelector(".app-bar").addEventListener("click", (e) => {
+      if (inConvoBack(e)) return;
+    });
+    function inConvoBack(e) {
+      if (state.thread && e.target.closest(".app-bar h1")) {
+        state.thread = null;
+        render();
+        log("Returned to thread list");
+        return true;
+      }
+      return false;
+    }
+    $("sendBtn").onclick = () => {
+      const text = $("msgInput").value.trim();
+      if (!text || !state.thread) return;
+      MESSAGES[state.thread.id].push({ dir: "out", body: text, time: "Now", status: "Sending" });
+      $("msgInput").value = "";
+      renderConversation();
+      log(`Sending SMS via <b>${SIMS.find(s => s.id === state.sim).label}</b>: "${text}"`);
+      setTimeout(() => {
+        const msgs = MESSAGES[state.thread.id];
+        msgs[msgs.length - 1].status = "Sent";
+        renderConversation();
+        log("Message status updated: <b>Sent</b>");
+      }, 700);
+    };
+
+    renderFeatures();
+    render();
+    log("Kheyr SMS interactive demo loaded");
+    log("Tap threads, retry a failed message, switch SIMs, or open Spam folder");
+  </script>
+</body>
+</html>
