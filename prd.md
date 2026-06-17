@@ -130,6 +130,7 @@ Last updated: 2026-06-17
 - [x] Added conversation message UI model for bubble, timestamp, and status rendering.
 - [x] Implement encrypted local storage at rest using SQLCipher or Android encrypted file-backed stores.
 - [x] Added SMS composer state reducer for send validation, SIM selection, completion, and retryable failures.
+- [x] Added incoming message presentation rules for SIM badge and relative timestamps.
 - [x] Added compose FAB state model for new conversation navigation.
 - [x] Added thread avatar presentation helper for initials and contact-photo availability.
 - [x] Added thread long-press menu model for pin, archive, delete, spam, read, and mute actions.
