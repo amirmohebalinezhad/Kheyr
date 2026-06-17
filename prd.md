@@ -130,6 +130,7 @@ Last updated: 2026-06-17
 - [x] Added conversation message UI model for bubble, timestamp, and status rendering.
 - [x] Implement encrypted local storage at rest using SQLCipher or Android encrypted file-backed stores.
 - [x] Added SMS composer state reducer for send validation, SIM selection, completion, and retryable failures.
+- [x] Added retryable send UI model for failed outgoing conversation messages.
 - [x] Build full Compose conversation UI and retryable send statuses.
 - [x] Wired encrypted Room database builder using SQLCipher support factory.
 - [x] Added local database passphrase store backed by Android encrypted preferences.
