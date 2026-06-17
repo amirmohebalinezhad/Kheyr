@@ -130,6 +130,7 @@ Last updated: 2026-06-17
 - [x] Added conversation message UI model for bubble, timestamp, and status rendering.
 - [x] Implement encrypted local storage at rest using SQLCipher or Android encrypted file-backed stores.
 - [x] Added SMS composer state reducer for send validation, SIM selection, completion, and retryable failures.
+- [x] Added cloud data export request model for synced data export with completion status.
 - [x] Added spam feedback history for local Mark Spam and Mark Not Spam corrections.
 - [x] Added spam auto-delete policy for configurable spam thread retention in days.
 - [x] Added thread reminder state model with due date and local notification trigger.
