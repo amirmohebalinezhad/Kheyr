@@ -130,6 +130,7 @@ Last updated: 2026-06-17
 - [x] Added conversation message UI model for bubble, timestamp, and status rendering.
 - [x] Implement encrypted local storage at rest using SQLCipher or Android encrypted file-backed stores.
 - [x] Added SMS composer state reducer for send validation, SIM selection, completion, and retryable failures.
+- [x] Added logout plan defining credential, sync key, and queue cleanup steps.
 - [x] Added account deletion request model with local wipe prerequisites.
 - [x] Added device registration payload for Android device name, platform, and public key.
 - [x] Added auth token state for access and refresh token expiry tracking.
