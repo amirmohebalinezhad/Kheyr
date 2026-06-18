@@ -1007,7 +1007,10 @@ private fun MessageBubbleContent(row: ConversationMessageRow, highlight: String?
     val clipboard = LocalClipboardManager.current
     var showCopyMenu by remember { mutableStateOf(false) }
     val copyableSegments = remember(row.body) { MessageCopyableSegmentDetector.findAll(row.body) }
-    val textModifier = Modifier.combinedClickable(onClick = {}, onLongClick = { showCopyMenu = true })
+    val bubbleModifier = Modifier
+        .padding(12.dp)
+        .widthIn(max = 300.dp)
+        .combinedClickable(onClick = {}, onLongClick = { showCopyMenu = true })
 
     if (showCopyMenu) {
         MessageCopyMenuDialog(
@@ -1029,11 +1032,10 @@ private fun MessageBubbleContent(row: ConversationMessageRow, highlight: String?
         )
     }
 
-    Column(Modifier.padding(12.dp).widthIn(max = 300.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(bubbleModifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         if (emojiStyle) {
             Text(
                 row.body,
-                modifier = textModifier,
                 fontSize = 28.sp,
                 textAlign = TextAlign.Center,
                 style = MaterialTheme.typography.bodyLarge.copy(
@@ -1041,7 +1043,7 @@ private fun MessageBubbleContent(row: ConversationMessageRow, highlight: String?
                 ),
             )
         } else {
-            HighlightedMessageText(text = row.body, highlight = highlight, modifier = textModifier)
+            HighlightedMessageText(text = row.body, highlight = highlight)
         }
         Text(
             row.timeLabel,
@@ -1269,17 +1271,67 @@ private fun ThreadActionDialog(thread: SmsThread, onDismiss: () -> Unit, onActio
         onDismissRequest = onDismiss,
         title = { Text(thread.displayName.ifBlank { thread.address }) },
         text = {
-            Column {
-                TextButton(onClick = onPin, modifier = Modifier.fillMaxWidth()) { Text(if (thread.isPinned) "Unpin" else "Pin") }
-                TextButton(onClick = { onAction(ThreadBulkAction.MarkRead) }, modifier = Modifier.fillMaxWidth()) { Text("Mark read") }
-                TextButton(onClick = { onAction(ThreadBulkAction.Archive) }, modifier = Modifier.fillMaxWidth()) { Text(if (thread.isArchived) "Unarchive" else "Archive") }
-                TextButton(onClick = { onAction(ThreadBulkAction.MarkSpam) }, modifier = Modifier.fillMaxWidth()) { Text(if (thread.isSpam) "Not spam" else "Mark spam") }
-                TextButton(onClick = { onAction(ThreadBulkAction.Mute) }, modifier = Modifier.fillMaxWidth()) { Text(if (thread.isMuted) "Unmute" else "Mute") }
-                TextButton(onClick = { onAction(ThreadBulkAction.Delete) }, modifier = Modifier.fillMaxWidth()) { Text("Delete messages") }
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.Start,
+            ) {
+                ThreadActionMenuItem(
+                    icon = Icons.Default.Star,
+                    label = if (thread.isPinned) "Unpin" else "Pin",
+                    onClick = onPin,
+                )
+                ThreadActionMenuItem(
+                    icon = Icons.Default.Check,
+                    label = "Mark read",
+                    onClick = { onAction(ThreadBulkAction.MarkRead) },
+                )
+                ThreadActionMenuItem(
+                    icon = Icons.Default.List,
+                    label = if (thread.isArchived) "Unarchive" else "Archive",
+                    onClick = { onAction(ThreadBulkAction.Archive) },
+                )
+                ThreadActionMenuItem(
+                    icon = Icons.Default.Warning,
+                    label = if (thread.isSpam) "Not spam" else "Mark spam",
+                    onClick = { onAction(ThreadBulkAction.MarkSpam) },
+                )
+                ThreadActionMenuItem(
+                    icon = Icons.Default.Notifications,
+                    label = if (thread.isMuted) "Unmute" else "Mute",
+                    onClick = { onAction(ThreadBulkAction.Mute) },
+                )
+                ThreadActionMenuItem(
+                    icon = Icons.Default.Delete,
+                    label = "Delete messages",
+                    onClick = { onAction(ThreadBulkAction.Delete) },
+                )
             }
         },
         confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
     )
+}
+
+@Composable
+private fun ThreadActionMenuItem(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    label: String,
+    onClick: () -> Unit,
+) {
+    TextButton(
+        onClick = onClick,
+        modifier = Modifier.fillMaxWidth(),
+        contentPadding = PaddingValues(horizontal = 0.dp, vertical = 4.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Start,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(12.dp))
+            Text(label)
+        }
+    }
 }
 
 private fun requiredPermissions(): Array<String> = buildList {

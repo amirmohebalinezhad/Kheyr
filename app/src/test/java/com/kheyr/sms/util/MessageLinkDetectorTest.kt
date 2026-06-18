@@ -41,4 +41,33 @@ class MessageLinkDetectorTest {
         assertEquals(1, links.size)
         assertEquals("https://example.com/path", links.first().url)
     }
+
+    @Test
+    fun findsBareDomainOnly() {
+        val links = MessageLinkDetector.findAll("Visit example.com today")
+        assertEquals(1, links.size)
+        assertEquals("https://example.com", links.first().url)
+        assertEquals(6, links.first().start)
+        assertEquals(17, links.first().end)
+    }
+
+    @Test
+    fun findsSubdomainOnly() {
+        val links = MessageLinkDetector.findAll("Go to api.example.com now")
+        assertEquals(1, links.size)
+        assertEquals("https://api.example.com", links.first().url)
+    }
+
+    @Test
+    fun findsNestedSubdomainOnly() {
+        val links = MessageLinkDetector.findAll("See cdn.assets.example.com for files")
+        assertEquals(1, links.size)
+        assertEquals("https://cdn.assets.example.com", links.first().url)
+    }
+
+    @Test
+    fun ignoresDomainInsideEmailAddress() {
+        val links = MessageLinkDetector.findAll("Email user@example.com for help")
+        assertEquals(0, links.size)
+    }
 }
