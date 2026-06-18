@@ -1,14 +1,13 @@
 # Kheyr
 
-Kheyr is a modern Android SMS client built with Kotlin and Jetpack Compose. It handles everyday text messaging on your phone while adding on-device spam filtering, dual-SIM support, and optional encrypted sync so you can keep conversations on your other devices — without giving the server readable message content.
+Kheyr is a modern Android SMS client built with Kotlin and Jetpack Compose. It handles everyday text messaging on your phone while adding on-device spam filtering and optional encrypted sync so you can keep conversations on your other devices — without giving the server readable message content.
 
 ## Features
 
-### SMS & MMS
+### SMS
 
-- Full default-SMS-app support: send, receive, and manage SMS and MMS
+- Full default-SMS-app support: send, receive, and manage text messages
 - Conversation threads with search, pinning, archiving, and blocking
-- Dual-SIM support with a configurable default SIM for outgoing messages
 - Contact integration, delivery status, and customizable notifications
 - Local encrypted database — message data is protected at rest on your device
 
@@ -36,9 +35,9 @@ Pair a Windows, macOS, or Linux desktop client with your phone to read synced th
 ### Coming in future versions
 
 - **Direct messaging** — Kheyr-to-Kheyr messages over data instead of carrier SMS (not ready yet)
-- **Group messaging** — multi-recipient conversations beyond standard SMS/MMS groups (not ready yet)
+- **Group messaging** — multi-recipient conversations beyond standard SMS groups (not ready yet)
 
-These features are planned for upcoming releases. The current version focuses on reliable SMS/MMS, spam protection, and optional encrypted sync.
+These features are planned for upcoming releases. The current version focuses on reliable SMS, spam protection, and optional encrypted sync.
 
 ## Getting started
 

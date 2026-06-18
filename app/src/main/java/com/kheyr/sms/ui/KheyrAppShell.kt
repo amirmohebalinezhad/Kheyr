@@ -18,6 +18,9 @@ import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
@@ -59,7 +62,7 @@ import com.kheyr.sms.data.SmsThread
 import com.kheyr.sms.domain.ThreadSorter
 import com.kheyr.sms.onboarding.DefaultSmsRoleChecker
 import com.kheyr.sms.onboarding.OnboardingGateState
-import com.kheyr.sms.onboarding.WelcomeScreenCopy
+import com.kheyr.sms.onboarding.OnboardingCopy
 import com.kheyr.sms.preferences.AppPreferences
 import com.kheyr.sms.settings.HelpFeedbackModel
 import com.kheyr.sms.settings.NotificationSettings
@@ -439,7 +442,10 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
             gesturesEnabled = screen == AppScreen.Threads && selectedThread == null,
             drawerContent = {
                 ModalDrawerSheet {
-                    Text("Kheyr", modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    KheyrBrandHeader(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 20.dp),
+                        subtitle = "SMS with spam filtering",
+                    )
                     MainDrawerModel.defaultItems().forEach { item ->
                         NavigationDrawerItem(
                             label = { Text(item.title) },
@@ -468,7 +474,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                 snackbarHost = { SnackbarHost(snackbarHostState) },
                 topBar = {
                     when (screen) {
-                        AppScreen.Conversation -> Unit
+                        AppScreen.Onboarding, AppScreen.Conversation -> Unit
                         else -> TopAppBar(
                             title = {
                                 when (screen) {
@@ -763,48 +769,240 @@ private fun OnboardingFlow(
     onRequestOtp: () -> Unit,
     onFinish: () -> Unit,
 ) {
-    val steps = listOf("Welcome", "Default SMS", "Permissions", "Sync account", "Import & rules")
-    Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        LinearProgressIndicator(progress = { (step + 1f) / steps.size }, modifier = Modifier.fillMaxWidth())
-        Text(steps.getOrElse(step) { "Done" }, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        when (step) {
-            0 -> {
-                Text(WelcomeScreenCopy.title, fontWeight = FontWeight.Bold)
-                Text(WelcomeScreenCopy.subtitle)
-                Text(WelcomeScreenCopy.defaultSmsRequirement)
-                Button(onClick = { onStepChange(1) }, modifier = Modifier.fillMaxWidth()) { Text("Continue") }
+    val steps = OnboardingCopy.steps
+    val stepInfo = steps.getOrElse(step) { steps.last() }
+    val scrollState = rememberScrollState()
+
+    Column(Modifier.fillMaxSize()) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 20.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            LinearProgressIndicator(
+                progress = { (step + 1f) / steps.size },
+                modifier = Modifier.fillMaxWidth(),
+                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+            )
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    stepInfo.title,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    "${step + 1} / ${steps.size}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
-            1 -> {
-                Text("Kheyr must be your default SMS app.")
-                if (!gate.isDefaultSmsApp) Button(onClick = onRequestDefault, modifier = Modifier.fillMaxWidth()) { Text("Make default SMS app") }
-                else Text("Default SMS role granted.", color = MaterialTheme.colorScheme.primary)
-                Button(onClick = { onStepChange(2) }, enabled = gate.isDefaultSmsApp, modifier = Modifier.fillMaxWidth()) { Text("Continue") }
+        }
+
+        Column(
+            Modifier
+                .weight(1f)
+                .verticalScroll(scrollState)
+                .padding(horizontal = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            KheyrMark(size = 96.dp)
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    stepInfo.headline,
+                    style = MaterialTheme.typography.headlineSmall,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                )
+                Text(
+                    stepInfo.body,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
             }
-            2 -> {
-                Text("Grant SMS, contacts, and notification permissions.")
-                if (gate.missingRequirements.isNotEmpty()) {
-                    Button(onClick = onRequestPermissions, modifier = Modifier.fillMaxWidth()) { Text("Grant permissions") }
-                } else {
-                    Text("All permissions granted.", color = MaterialTheme.colorScheme.primary)
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    stepInfo.detail,
+                    modifier = Modifier.padding(16.dp),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+            }
+            when (step) {
+                1 -> OnboardingStatusRow(
+                    complete = gate.isDefaultSmsApp,
+                    completeLabel = "Default SMS role granted",
+                    pendingLabel = "Kheyr is not the default SMS app yet",
+                )
+                2 -> Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    OnboardingPermissionRow("SMS access", gate.smsPermissionGranted)
+                    OnboardingPermissionRow("Contacts", gate.contactsPermissionGranted)
+                    OnboardingPermissionRow("Notifications", gate.notificationPermissionGranted)
                 }
-                val ready = gate.canUseFullSmsFeatures
-                Button(onClick = { onStepChange(3) }, enabled = ready, modifier = Modifier.fillMaxWidth()) { Text("Continue") }
-            }
-            3 -> {
-                Text("Optional: create an account to enable encrypted sync and desktop access.")
-                Text("Backend URL: ${ApiConfig.baseUrl}", style = MaterialTheme.typography.labelSmall)
-                OutlinedTextField(value = otpPhone, onValueChange = onOtpPhoneChange, label = { Text("Phone (+E.164)") }, modifier = Modifier.fillMaxWidth())
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = onRequestOtp, modifier = Modifier.weight(1f)) { Text("Send OTP") }
-                    OutlinedTextField(value = otpCode, onValueChange = onOtpCodeChange, label = { Text("Code") }, modifier = Modifier.weight(1f))
+                3 -> Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                    OutlinedTextField(
+                        value = otpPhone,
+                        onValueChange = onOtpPhoneChange,
+                        label = { Text("Phone (+E.164)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                    )
+                    OutlinedTextField(
+                        value = otpCode,
+                        onValueChange = onOtpCodeChange,
+                        label = { Text("Verification code") },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                    )
+                    Text(
+                        "Backend URL: ${ApiConfig.baseUrl}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
-                Button(onClick = onEnableSync, modifier = Modifier.fillMaxWidth()) { Text("Enable sync") }
-                TextButton(onClick = onSkipSync, modifier = Modifier.fillMaxWidth()) { Text("Skip for now") }
-                if (otpCode.isNotBlank()) TextButton(onClick = onVerifyOtp) { Text("Verify OTP") }
             }
-            else -> {
-                Text("Importing existing SMS and downloading spam rules happens automatically.")
-                Button(onClick = onFinish, modifier = Modifier.fillMaxWidth()) { Text("Open inbox") }
+        }
+
+        OnboardingBottomBar(
+            step = step,
+            gate = gate,
+            otpCode = otpCode,
+            onStepChange = onStepChange,
+            onRequestDefault = onRequestDefault,
+            onRequestPermissions = onRequestPermissions,
+            onSkipSync = onSkipSync,
+            onEnableSync = onEnableSync,
+            onVerifyOtp = onVerifyOtp,
+            onRequestOtp = onRequestOtp,
+            onFinish = onFinish,
+        )
+    }
+}
+
+@Composable
+private fun OnboardingStatusRow(complete: Boolean, completeLabel: String, pendingLabel: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            imageVector = if (complete) Icons.Default.CheckCircle else Icons.Default.Info,
+            contentDescription = null,
+            tint = if (complete) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Text(
+            if (complete) completeLabel else pendingLabel,
+            color = if (complete) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+        )
+    }
+}
+
+@Composable
+private fun OnboardingPermissionRow(label: String, granted: Boolean) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(label)
+        Text(
+            if (granted) "Granted" else "Needed",
+            color = if (granted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
+            style = MaterialTheme.typography.labelLarge,
+        )
+    }
+}
+
+@Composable
+private fun OnboardingBottomBar(
+    step: Int,
+    gate: OnboardingGateState,
+    otpCode: String,
+    onStepChange: (Int) -> Unit,
+    onRequestDefault: () -> Unit,
+    onRequestPermissions: () -> Unit,
+    onSkipSync: () -> Unit,
+    onEnableSync: () -> Unit,
+    onVerifyOtp: () -> Unit,
+    onRequestOtp: () -> Unit,
+    onFinish: () -> Unit,
+) {
+    Surface(
+        tonalElevation = 3.dp,
+        shadowElevation = 8.dp,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 24.dp, vertical = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            when (step) {
+                0 -> Button(onClick = { onStepChange(1) }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Continue")
+                }
+                1 -> {
+                    if (!gate.isDefaultSmsApp) {
+                        OutlinedButton(onClick = onRequestDefault, modifier = Modifier.fillMaxWidth()) {
+                            Text("Make default SMS app")
+                        }
+                    }
+                    Button(
+                        onClick = { onStepChange(2) },
+                        enabled = gate.isDefaultSmsApp,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Continue")
+                    }
+                }
+                2 -> {
+                    if (gate.missingRequirements.isNotEmpty()) {
+                        OutlinedButton(onClick = onRequestPermissions, modifier = Modifier.fillMaxWidth()) {
+                            Text("Grant permissions")
+                        }
+                    }
+                    Button(
+                        onClick = { onStepChange(3) },
+                        enabled = gate.canUseFullSmsFeatures,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text("Continue")
+                    }
+                }
+                3 -> {
+                    OutlinedButton(onClick = onRequestOtp, modifier = Modifier.fillMaxWidth()) {
+                        Text("Send OTP")
+                    }
+                    if (otpCode.isNotBlank()) {
+                        OutlinedButton(onClick = onVerifyOtp, modifier = Modifier.fillMaxWidth()) {
+                            Text("Verify OTP")
+                        }
+                    }
+                    Button(onClick = onEnableSync, modifier = Modifier.fillMaxWidth()) {
+                        Text("Enable sync")
+                    }
+                    TextButton(onClick = onSkipSync, modifier = Modifier.fillMaxWidth()) {
+                        Text("Skip for now")
+                    }
+                }
+                else -> Button(onClick = onFinish, modifier = Modifier.fillMaxWidth()) {
+                    Text("Open inbox")
+                }
             }
         }
     }
@@ -1158,8 +1356,8 @@ private fun SettingsDetailScreen(
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(pref.name); RadioButton(selected = themePreference == pref, onClick = { onThemeChange(pref) }) }
             }
             SettingsCategory.About -> {
-                Text("Kheyr SMS v0.1.0")
-                Text("Modern SMS with spam filtering, sync, and desktop relay.")
+                KheyrBrandHeader(subtitle = "Version 0.1.0")
+                Text("Modern SMS with spam filtering, sync, and desktop relay.", style = MaterialTheme.typography.bodyMedium)
                 TextButton(onClick = {}) { Text("Privacy policy") }
             }
         }
