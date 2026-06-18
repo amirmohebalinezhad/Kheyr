@@ -1,5 +1,6 @@
 package com.kheyr.sms.receiver
 
+import android.annotation.SuppressLint
 import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -107,6 +108,8 @@ class PolicyAwareIncomingSmsNotifier(
 ) : IncomingSmsNotifier {
     private val resolver = NotificationPolicyResolver()
 
+    // notify() is guarded by canPostNotifications(), which checks POST_NOTIFICATIONS on API 33+.
+    @SuppressLint("MissingPermission")
     override fun show(message: StoredIncomingSms, senderIsContact: Boolean) {
         if (!canPostNotifications()) return
         val profile = runBlocking(Dispatchers.IO) { contactRepository.lookupProfile(message.sender) }
