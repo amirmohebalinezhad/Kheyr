@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Join the Kheyr open-source project — Android, backend, and desktop contributors welcome.">
+  <title>Developers — Kheyr</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container nav">
+      <a class="brand" href="index.html">
+        <span class="brand-mark">K</span>
+        <span>Kheyr</span>
+      </a>
+      <nav aria-label="Primary">
+        <ul class="nav-links">
+          <li><a href="index.html">Home</a></li>
+          <li><a href="privacy.html">Privacy</a></li>
+          <li><a href="security.html">Security</a></li>
+          <li><a class="active" href="developers.html">Developers</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="container hero-grid">
+        <div>
+          <span class="eyebrow">Open source</span>
+          <h1>Help build a privacy-respecting SMS client.</h1>
+          <p class="lead">
+            Kheyr is an Android SMS app with on-device spam filtering, encrypted optional sync,
+            and a cross-platform desktop companion. We welcome contributors who care about messaging
+            UX, mobile reliability, cryptography, and open infrastructure.
+          </p>
+          <div class="btn-row">
+            <a class="btn btn-primary" href="https://github.com/amirmohebalinezhad/Kheyr">View on GitHub</a>
+            <a class="btn btn-secondary" href="mailto:support@kheyr.app">Say hello</a>
+          </div>
+        </div>
+        <aside class="card">
+          <h3>Repository</h3>
+          <div class="meta-grid">
+            <div class="meta-row"><span class="meta-label">Project</span><span><a href="https://github.com/amirmohebalinezhad/Kheyr">amirmohebalinezhad/Kheyr</a></span></div>
+            <div class="meta-row"><span class="meta-label">Android</span><span>Kotlin, Compose, Room</span></div>
+            <div class="meta-row"><span class="meta-label">Backend</span><span>ASP.NET Core 10</span></div>
+            <div class="meta-row"><span class="meta-label">Desktop</span><span>.NET 10, Avalonia UI</span></div>
+            <div class="meta-row"><span class="meta-label">Tests</span><span>JUnit4 + Robolectric</span></div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="section section-muted">
+      <div class="container">
+        <h2>Where you can help</h2>
+        <div class="card-grid three">
+          <article class="card">
+            <h3>Android app</h3>
+            <p>Default SMS integration, dual-SIM edge cases, Compose UI, Room persistence, WorkManager sync, notification policies, and on-device spam scoring.</p>
+            <p><span class="tag">Kotlin</span><span class="tag">Jetpack Compose</span><span class="tag">Room</span></p>
+          </article>
+          <article class="card">
+            <h3>Backend API</h3>
+            <p>Auth, encrypted sync storage, spam rule distribution, QR pairing, desktop relay, SignalR realtime hub, and admin tooling.</p>
+            <p><span class="tag">ASP.NET Core</span><span class="tag">PostgreSQL</span><span class="tag">SignalR</span></p>
+          </article>
+          <article class="card">
+            <h3>Desktop client</h3>
+            <p>Cross-platform Avalonia UI, local encrypted storage, pairing flows, thread/conversation views, and SMS relay UX.</p>
+            <p><span class="tag">.NET 10</span><span class="tag">Avalonia</span><span class="tag">Windows/macOS/Linux</span></p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container prose">
+        <h2>Good first contributions</h2>
+        <ul class="feature-list">
+          <li>Fix UI polish issues in Compose screens or desktop Avalonia views.</li>
+          <li>Improve unit test coverage for domain logic (spam scoring, sync planners, notification policies).</li>
+          <li>Document setup steps for backend, Android, or desktop in README files.</li>
+          <li>Investigate dual-SIM behavior on specific device manufacturers.</li>
+          <li>Harden encryption and key-exchange flows with review and tests.</li>
+          <li>Improve accessibility, localization, and onboarding copy.</li>
+        </ul>
+
+        <h2>Development setup</h2>
+        <h3>Android</h3>
+        <ul>
+          <li>JDK 17, Android SDK, Gradle 8.x</li>
+          <li>Build debug APK: <code>gradle --no-daemon :app:assembleDebug</code></li>
+          <li>Unit tests: <code>gradle --no-daemon :app:testDebugUnitTest</code></li>
+        </ul>
+
+        <h3>Backend</h3>
+        <p>See <code>backend/README.md</code> in the repository for API, SignalR hub, and admin panel setup.</p>
+
+        <h3>Desktop</h3>
+        <p>The Avalonia desktop app targets .NET 10 on Windows, macOS, and Linux. Pairing and sync depend on a running backend instance.</p>
+
+        <h2>Contribution guidelines</h2>
+        <ol class="steps">
+          <li>Fork the repository and create a focused branch for your change.</li>
+          <li>Keep pull requests small and explain the user-facing behavior you are changing.</li>
+          <li>Add or update tests when you touch domain logic.</li>
+          <li>Do not commit secrets, production API keys, or personal SMS fixtures.</li>
+          <li>Respect privacy requirements: spam feedback and analytics must avoid raw message bodies unless explicitly approved.</li>
+          <li>Open a pull request with screenshots or test output when relevant.</li>
+        </ol>
+
+        <div class="callout">
+          Unsure where to start? Open a GitHub issue describing your environment and interests, or email <a href="mailto:support@kheyr.app">support@kheyr.app</a> — we are happy to suggest a first task.
+        </div>
+
+        <h2>Areas we especially need help with</h2>
+        <ul>
+          <li>Real-device dual-SIM testing across OEM Android skins</li>
+          <li>Security review of sync encryption and desktop key exchange</li>
+          <li>Performance tuning for large SMS inbox sync backfills</li>
+          <li>Desktop daily-driver UX and keyboard shortcuts</li>
+          <li>Localization and RTL layout support</li>
+        </ul>
+
+        <h2>Code of conduct</h2>
+        <p>Be respectful, constructive, and privacy-conscious. Harassment, drive-by criticism, or sharing user message content in issues or PRs is not tolerated.</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-grid">
+      <div>
+        <a class="brand" href="index.html">
+          <span class="brand-mark">K</span>
+          <span>Kheyr</span>
+        </a>
+        <p>Modern SMS for Android with privacy-first optional sync.</p>
+      </div>
+      <div>
+        <strong>Legal</strong>
+        <ul class="footer-links">
+          <li><a href="privacy.html">Privacy policy</a></li>
+          <li><a href="security.html">Security</a></li>
+        </ul>
+      </div>
+      <div>
+        <strong>Project</strong>
+        <ul class="footer-links">
+          <li><a href="developers.html">Contribute</a></li>
+          <li><a href="https://github.com/amirmohebalinezhad/Kheyr">GitHub repository</a></li>
+          <li><a href="mailto:support@kheyr.app">support@kheyr.app</a></li>
+        </ul>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

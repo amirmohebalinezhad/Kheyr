@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Kheyr is a modern Android SMS app with on-device spam filtering, dual-SIM support, encrypted sync, and desktop SMS relay.">
+  <title>Kheyr — Modern SMS for Android</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container nav">
+      <a class="brand" href="index.html">
+        <span class="brand-mark">K</span>
+        <span>Kheyr</span>
+      </a>
+      <nav aria-label="Primary">
+        <ul class="nav-links">
+          <li><a class="active" href="index.html">Home</a></li>
+          <li><a href="privacy.html">Privacy</a></li>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="developers.html">Developers</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="container hero-grid">
+        <div>
+          <span class="eyebrow">Android SMS client</span>
+          <h1>A cleaner inbox, smarter spam control, and optional encrypted sync.</h1>
+          <p class="lead">
+            Kheyr replaces your default SMS app with a modern chat-style inbox, on-device spam
+            filtering, dual-SIM routing, per-contact notifications, and optional cloud sync with a
+            desktop companion app.
+          </p>
+          <div class="btn-row">
+            <a class="btn btn-primary" href="#get-started">Get started</a>
+            <a class="btn btn-secondary" href="privacy.html">Privacy policy</a>
+          </div>
+        </div>
+        <aside class="card">
+          <h3>At a glance</h3>
+          <div class="meta-grid">
+            <div class="meta-row"><span class="meta-label">Platform</span><span>Android 8+</span></div>
+            <div class="meta-row"><span class="meta-label">Package</span><span><code>com.kheyr.sms</code></span></div>
+            <div class="meta-row"><span class="meta-label">Support</span><span><a href="mailto:support@kheyr.app">support@kheyr.app</a></span></div>
+            <div class="meta-row"><span class="meta-label">Sync</span><span>Opt-in, client-encrypted</span></div>
+            <div class="meta-row"><span class="meta-label">Desktop</span><span>Windows, macOS, Linux</span></div>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section class="section section-muted">
+      <div class="container">
+        <h2>What Kheyr does</h2>
+        <div class="card-grid three">
+          <article class="card">
+            <h3>Modern SMS inbox</h3>
+            <p>Thread list with avatars, pinned conversations, search, archive, and a Telegram-inspired layout without copying third-party branding.</p>
+          </article>
+          <article class="card">
+            <h3>On-device spam filtering</h3>
+            <p>Global spam rules are downloaded from Kheyr servers and scored locally on your phone. High-score messages move to a Spam folder and do not trigger notifications.</p>
+          </article>
+          <article class="card">
+            <h3>Encrypted sync &amp; desktop</h3>
+            <p>Optionally sync SMS to the cloud with client-side encryption, then read and send messages from a native desktop app paired to your phone.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="get-started">
+      <div class="container prose">
+        <h2>Getting started</h2>
+        <p>Follow these steps after installing Kheyr from Google Play or a release build.</p>
+
+        <h3>1. Install and open Kheyr</h3>
+        <p>Launch the app and complete the welcome screen. Kheyr must become your <strong>default SMS app</strong> to read, send, and receive carrier SMS messages.</p>
+
+        <h3>2. Grant required permissions</h3>
+        <p>During onboarding, Kheyr requests permissions only for features you use:</p>
+        <ul class="checklist">
+          <li><strong>SMS</strong> — read, receive, and send text messages as your default SMS app.</li>
+          <li><strong>Contacts</strong> — show contact names and apply contact-specific notification rules.</li>
+          <li><strong>Notifications</strong> — alert you for new messages after spam and privacy policies are applied.</li>
+          <li><strong>Phone state</strong> — identify dual-SIM slots and route outgoing SMS to the selected SIM.</li>
+        </ul>
+        <div class="callout callout-warning">
+          If you deny SMS permission or refuse the default SMS role, core messaging features remain unavailable until you grant them in Android settings.
+        </div>
+
+        <h3>3. Import existing messages</h3>
+        <p>On first setup, Kheyr can import SMS already stored on your device into its local encrypted database. Deleted message history before sync is enabled is not uploaded to the cloud.</p>
+
+        <h3>4. Download spam rules</h3>
+        <p>Kheyr downloads the latest global spam rule set. Scoring runs entirely on your device; message bodies are not sent to the server for spam classification.</p>
+
+        <h3>5. Start messaging</h3>
+        <p>Use the floating compose button to start a conversation, reply in threads, retry failed sends, and choose a SIM on dual-SIM phones.</p>
+      </div>
+    </section>
+
+    <section class="section section-muted">
+      <div class="container prose">
+        <h2>Using the inbox</h2>
+
+        <h3>Navigation drawer</h3>
+        <ul class="feature-list">
+          <li><strong>All Messages</strong> — main inbox, newest activity first.</li>
+          <li><strong>Spam</strong> — messages classified as spam; no notifications by default.</li>
+          <li><strong>Archived</strong> — conversations removed from the main list.</li>
+          <li><strong>Pinned</strong> — pinned threads sorted by pin date.</li>
+          <li><strong>Contacts</strong> — quick access to people you message.</li>
+          <li><strong>Desktop Sync</strong> — pair and manage desktop devices.</li>
+          <li><strong>Settings</strong> — notifications, spam, SIM, sync, privacy, appearance.</li>
+          <li><strong>Help &amp; Feedback</strong> — support links and feedback.</li>
+        </ul>
+
+        <h3>Thread actions</h3>
+        <p>Long-press a conversation to pin, archive, delete, mark as spam, mark as read, mute, or open notification settings for that thread.</p>
+
+        <h3>Conversation screen</h3>
+        <ul class="feature-list">
+          <li>Send and receive SMS, including multipart long messages.</li>
+          <li>See sending, sent, delivered, and failed status; tap retry on failures.</li>
+          <li>Select SIM before sending on dual-SIM devices.</li>
+          <li>Search inside a conversation.</li>
+          <li>Emoji-only messages appear larger without a normal bubble.</li>
+          <li>Copy, delete, or correct spam classification on individual messages.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container prose">
+        <h2>Spam protection</h2>
+        <p>Kheyr scores each incoming SMS locally using server-managed global rules. The server provides rule definitions only; it does not need to read your message content to classify spam.</p>
+
+        <h3>Default score behavior</h3>
+        <table>
+          <thead>
+            <tr><th>Score</th><th>Classification</th><th>Behavior</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Below 40</td><td>Normal</td><td>Appears in All Messages; normal notifications apply.</td></tr>
+            <tr><td>40–69</td><td>Suspicious</td><td>Stays in inbox; details may show a warning.</td></tr>
+            <tr><td>70+</td><td>Spam</td><td>Moved to Spam folder; notification suppressed.</td></tr>
+          </tbody>
+        </table>
+
+        <p>Rule types include number prefixes, keywords, URLs, regex patterns, sender frequency, OTP patterns with negative scores, and more. You can mark a thread or message as <strong>Spam</strong> or <strong>Not Spam</strong>; feedback is sent anonymously without uploading raw message bodies by default.</p>
+      </div>
+    </section>
+
+    <section class="section section-muted">
+      <div class="container prose">
+        <h2>Notifications</h2>
+        <p>Customize how Kheyr alerts you:</p>
+        <ul class="feature-list">
+          <li>Global and per-thread ringtones.</li>
+          <li>Mute or silence specific conversations.</li>
+          <li>Separate policies for unknown senders: normal, silent, or no notification.</li>
+          <li>Notification content privacy: show preview, sender only, or hide content on the lock screen.</li>
+          <li>Spam and blocked senders never notify by default.</li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container prose">
+        <h2>Dual SIM</h2>
+        <p>Kheyr detects available SIM cards, shows which SIM received a message when the platform provides that data, and lets you:</p>
+        <ul class="feature-list">
+          <li>Pick a SIM when composing or replying.</li>
+          <li>Set a global default SIM in Settings.</li>
+          <li>Override the default SIM per conversation.</li>
+        </ul>
+        <p>Desktop send requests respect your thread default or global default SIM selection.</p>
+      </div>
+    </section>
+
+    <section class="section section-muted">
+      <div class="container prose">
+        <h2>Optional sync and desktop access</h2>
+        <p><strong>Sync is off by default.</strong> You must explicitly create an account and enable sync in Settings.</p>
+
+        <h3>When sync is enabled</h3>
+        <ol class="steps">
+          <li>Sign in with your phone number and OTP verification.</li>
+          <li>Kheyr uploads your current SMS messages using client-side encryption.</li>
+          <li>Incremental sync keeps new messages, spam state, pins, archives, read state, and delete events in sync.</li>
+          <li>Install the Kheyr desktop app on Windows, macOS, or Linux.</li>
+          <li>Pair desktop by scanning the QR code on your phone and approving the device.</li>
+          <li>Read synced threads on desktop and send SMS through your phone’s SIM.</li>
+        </ol>
+
+        <div class="callout">
+          SMS bodies are encrypted on your phone before upload. Kheyr servers store ciphertext and limited metadata only. See the <a href="security.html">Security page</a> for encryption details.
+        </div>
+
+        <h3>Desktop SMS sending</h3>
+        <p>Desktop does not send SMS directly. It creates a relay request; your Android phone must be online to deliver the message through the selected SIM. If the phone is offline, desktop shows a waiting state and retries according to queue policy.</p>
+
+        <h3>Revoking access</h3>
+        <p>View paired desktop devices under Settings → Desktop Devices and revoke any device instantly. You can also delete cloud data or your account from Privacy &amp; Security settings.</p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container prose">
+        <h2>Direct messages</h2>
+        <p>When both you and a contact use Kheyr with accounts, you may send internet-based direct text and picture messages. These are visually distinct from carrier SMS. If the recipient is not registered, Kheyr falls back to SMS automatically.</p>
+        <p>Direct messages are transported over Kheyr’s online service. They are not end-to-end encrypted in the current release; see <a href="security.html">Security</a> for the full encryption model.</p>
+      </div>
+    </section>
+
+    <section class="section section-muted">
+      <div class="container prose">
+        <h2>Settings overview</h2>
+        <div class="card-grid two">
+          <div class="card">
+            <h3>Notifications</h3>
+            <p>Ringtone, vibration, and lock-screen content privacy.</p>
+          </div>
+          <div class="card">
+            <h3>Unknown senders</h3>
+            <p>How non-contacts appear in your notification shade.</p>
+          </div>
+          <div class="card">
+            <h3>Spam protection</h3>
+            <p>Enable filtering and view the active rule version.</p>
+          </div>
+          <div class="card">
+            <h3>Dual SIM</h3>
+            <p>Global default SIM and per-thread overrides.</p>
+          </div>
+          <div class="card">
+            <h3>Sync</h3>
+            <p>Enable or disable encrypted cloud sync.</p>
+          </div>
+          <div class="card">
+            <h3>Privacy &amp; Security</h3>
+            <p>Export or delete cloud data, manage encryption settings.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container prose">
+        <h2>Troubleshooting</h2>
+        <ul class="feature-list">
+          <li><strong>Cannot send SMS</strong> — confirm Kheyr is the default SMS app and SMS permission is granted. Check SIM selection and carrier signal.</li>
+          <li><strong>No notifications</strong> — verify notification permission, thread mute state, unknown-sender policy, and spam classification.</li>
+          <li><strong>Sync not updating</strong> — ensure sync is enabled, you are signed in, and battery optimization is not restricting background sync.</li>
+          <li><strong>Desktop send stuck</strong> — keep your phone online and signed in; relay requests expire if the phone stays offline too long.</li>
+          <li><strong>Lost default SMS role</strong> — Kheyr warns you and prompts to restore the default SMS role in Android settings.</li>
+        </ul>
+        <p>Need help? Email <a href="mailto:support@kheyr.app">support@kheyr.app</a>.</p>
+      </div>
+    </section>
+
+    <section class="section section-muted">
+      <div class="container">
+        <h2>Google Play information</h2>
+        <div class="card-grid two">
+          <div class="card prose">
+            <h3>Short description</h3>
+            <p>Modern SMS with spam filtering, dual SIM, encrypted sync, and desktop messaging.</p>
+            <h3>Full description summary</h3>
+            <p>Kheyr is a full SMS replacement for Android. Manage conversations in a clean inbox, block notification noise with on-device spam scoring, customize alerts per contact, route messages across two SIMs, and optionally sync with end-to-end client encryption to a desktop companion app.</p>
+          </div>
+          <div class="card prose">
+            <h3>Required store links</h3>
+            <ul class="feature-list">
+              <li><a href="privacy.html">Privacy policy</a></li>
+              <li><a href="security.html">Data safety &amp; encryption</a></li>
+              <li><a href="mailto:support@kheyr.app">Developer contact</a></li>
+            </ul>
+            <h3>Data collected (when sync enabled)</h3>
+            <p>Account phone number, device identifiers, encrypted message payloads, sync metadata, spam feedback hashes, and pairing records. SMS content is encrypted on device before upload.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-grid">
+      <div>
+        <a class="brand" href="index.html">
+          <span class="brand-mark">K</span>
+          <span>Kheyr</span>
+        </a>
+        <p>Modern SMS for Android with privacy-first optional sync.</p>
+      </div>
+      <div>
+        <strong>Legal</strong>
+        <ul class="footer-links">
+          <li><a href="privacy.html">Privacy policy</a></li>
+          <li><a href="security.html">Security</a></li>
+        </ul>
+      </div>
+      <div>
+        <strong>Project</strong>
+        <ul class="footer-links">
+          <li><a href="developers.html">Contribute</a></li>
+          <li><a href="https://github.com/amirmohebalinezhad/Kheyr">GitHub repository</a></li>
+          <li><a href="mailto:support@kheyr.app">support@kheyr.app</a></li>
+        </ul>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

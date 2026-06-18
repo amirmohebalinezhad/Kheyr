@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="How Kheyr encrypts SMS at rest, in sync, and during desktop pairing.">
+  <title>Security &amp; Encryption — Kheyr</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container nav">
+      <a class="brand" href="index.html">
+        <span class="brand-mark">K</span>
+        <span>Kheyr</span>
+      </a>
+      <nav aria-label="Primary">
+        <ul class="nav-links">
+          <li><a href="index.html">Home</a></li>
+          <li><a href="privacy.html">Privacy</a></li>
+          <li><a class="active" href="security.html">Security</a></li>
+          <li><a href="developers.html">Developers</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="page-title">
+      <div class="container prose">
+        <h1>Security &amp; Encryption</h1>
+        <p>
+          Kheyr is designed so your carrier SMS can stay on your phone by default, with optional
+          cloud sync that keeps message bodies encrypted end-to-end from the server’s perspective.
+          This page describes the cryptography and key handling implemented in the published app.
+        </p>
+      </div>
+    </section>
+
+    <section class="section section-muted">
+      <div class="container">
+        <h2>Security model at a glance</h2>
+        <div class="card-grid three">
+          <article class="card">
+            <h3>Local at rest</h3>
+            <p>Room database encrypted with SQLCipher. Passphrase stored in Android EncryptedSharedPreferences backed by AES-256-GCM master keys.</p>
+          </article>
+          <article class="card">
+            <h3>Cloud sync</h3>
+            <p>SMS bodies encrypted with AES-256-GCM on Android before upload. Servers store ciphertext and minimized metadata only.</p>
+          </article>
+          <article class="card">
+            <h3>Desktop access</h3>
+            <p>Sync keys delivered during approved QR pairing. Revoked devices lose decryption and API access immediately.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container prose">
+        <h2>1. Local storage encryption</h2>
+        <p>All SMS threads and messages stored in Kheyr’s on-device database are protected at rest.</p>
+
+        <h3>Technology</h3>
+        <ul>
+          <li><strong>SQLCipher</strong> — full-database encryption for the local Room database file (<code>kheyr_sms.db</code>).</li>
+          <li><strong>Android Keystore</strong> — the SQLCipher passphrase is generated and stored using encrypted shared preferences with AES-256-SIV key encryption and AES-256-GCM value encryption.</li>
+        </ul>
+
+        <h3>Protected fields</h3>
+        <p>Sensitive columns including message body, sender/receiver address, and display names are stored inside the encrypted database. Search and spam scoring operate on decrypted local data only on your device.</p>
+
+        <div class="callout">
+          Uninstalling the app or clearing app data removes local keys and message storage unless you have a separate backup you created through export features.
+        </div>
+
+        <h2>2. Sync encryption (client-side)</h2>
+        <p>When you opt in to sync, Kheyr encrypts SMS content on your Android device before any upload. Our backend never receives plaintext SMS bodies and cannot decrypt synced message content.</p>
+
+        <h3>Algorithm</h3>
+        <table>
+          <thead>
+            <tr><th>Component</th><th>Implementation</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>Message body cipher</td><td><code>AES/GCM/NoPadding</code> (AES-256-GCM)</td></tr>
+            <tr><td>Nonce</td><td>12-byte random nonce per message, transmitted alongside ciphertext</td></tr>
+            <tr><td>Authentication tag</td><td>128-bit GCM tag</td></tr>
+            <tr><td>Encoding</td><td>Base64-encoded nonce and ciphertext in sync payloads</td></tr>
+            <tr><td>Sync key storage</td><td>Android Keystore alias <code>kheyr_sync_key</code></td></tr>
+          </tbody>
+        </table>
+
+        <h3>Key lifecycle</h3>
+        <ol class="steps">
+          <li>A per-account sync encryption key is generated on your Android device when sync is set up.</li>
+          <li>The key is stored in Android Keystore and is required before any encrypted upload proceeds.</li>
+          <li>SMS bodies are encrypted with this key immediately before being placed on the sync upload queue.</li>
+          <li>Only ciphertext, algorithm identifier, nonce, and non-sensitive metadata are transmitted to the server.</li>
+          <li>Desktop clients receive key material during an approved QR pairing exchange and decrypt locally.</li>
+          <li>Revoking a desktop device or deleting cloud data removes server-side access to future sync payloads for that device.</li>
+        </ol>
+
+        <h3>Field protection policy</h3>
+        <p>Sync uploads apply field-level protection rules:</p>
+        <ul>
+          <li><strong>Encrypted</strong> — message body, sender, recipient, address fields</li>
+          <li><strong>Salted hash</strong> — phone numbers used for discovery or correlation where full numbers are not required</li>
+          <li><strong>Plain metadata</strong> — timestamps, direction, message type, spam flags, pin/archive state, and other operational fields needed for sync without revealing content</li>
+        </ul>
+
+        <h2>3. Transport security</h2>
+        <ul>
+          <li>All API and sync traffic uses HTTPS (TLS).</li>
+          <li>Realtime desktop relay and sync updates use authenticated WebSocket connections (SignalR) with access tokens.</li>
+          <li>Desktop SMS relay requests carry encrypted target numbers and message bodies when submitted from desktop clients.</li>
+        </ul>
+
+        <h2>4. Desktop pairing</h2>
+        <p>Desktop apps cannot read your synced SMS until you explicitly approve pairing on your phone.</p>
+        <ul>
+          <li>Pairing sessions are time-limited QR codes.</li>
+          <li>Android shows the requesting device name and platform before approval.</li>
+          <li>Approved desktops register a device public key and receive credentials needed to decrypt synced data.</li>
+          <li>Revocation from Android immediately blocks API and realtime access for that desktop.</li>
+          <li>Desktop apps store decrypted data in local encrypted storage on each platform.</li>
+        </ul>
+
+        <h2>5. Spam processing privacy</h2>
+        <p>Spam rules are downloaded as signed/versioned rule sets. Scoring executes entirely on-device. User spam feedback uploads hashed identifiers and rule metadata—not raw SMS bodies—so global rules can improve without exposing message content.</p>
+
+        <h2>6. Direct messages</h2>
+        <p>Internet-based direct text and picture messages are a separate channel from carrier SMS. In the current release, direct messages are <strong>not</strong> end-to-end encrypted; they are protected in transit with TLS and stored on Kheyr servers for delivery and multi-device access. We clearly label direct messages in the UI so you can distinguish them from SMS.</p>
+
+        <h2>7. What the server can and cannot see</h2>
+        <table>
+          <thead>
+            <tr><th>Data</th><th>Server visibility</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>SMS body (sync enabled)</td><td>Ciphertext only — not readable by Kheyr servers</td></tr>
+            <tr><td>Phone number (account)</td><td>Stored for authentication; may also be hashed for lookups</td></tr>
+            <tr><td>Thread/message metadata</td><td>Timestamps, IDs, spam/pin/archive flags, sync cursors</td></tr>
+            <tr><td>Spam rule definitions</td><td>Public rule payloads served to all clients</td></tr>
+            <tr><td>Spam feedback</td><td>Anonymous hashes and scores, not raw bodies by default</td></tr>
+            <tr><td>Direct messages</td><td>Server-processed for delivery (not E2E encrypted today)</td></tr>
+          </tbody>
+        </table>
+
+        <h2>8. Your controls</h2>
+        <ul>
+          <li>Keep sync disabled to avoid any cloud upload.</li>
+          <li>Delete cloud data or your entire account from Settings → Privacy &amp; Security.</li>
+          <li>Revoke individual desktop devices at any time.</li>
+          <li>Rotate or remove access by signing out and deleting sync keys as part of account deletion.</li>
+        </ul>
+
+        <h2>9. Reporting security issues</h2>
+        <p>If you discover a vulnerability, email <a href="mailto:support@kheyr.app">support@kheyr.app</a> with steps to reproduce. We appreciate responsible disclosure and will respond as quickly as possible.</p>
+
+        <p>Related: <a href="privacy.html">Privacy Policy</a> · <a href="index.html">User guide</a></p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-grid">
+      <div>
+        <a class="brand" href="index.html">
+          <span class="brand-mark">K</span>
+          <span>Kheyr</span>
+        </a>
+        <p>Modern SMS for Android with privacy-first optional sync.</p>
+      </div>
+      <div>
+        <strong>Legal</strong>
+        <ul class="footer-links">
+          <li><a href="privacy.html">Privacy policy</a></li>
+          <li><a href="security.html">Security</a></li>
+        </ul>
+      </div>
+      <div>
+        <strong>Project</strong>
+        <ul class="footer-links">
+          <li><a href="developers.html">Contribute</a></li>
+          <li><a href="https://github.com/amirmohebalinezhad/Kheyr">GitHub repository</a></li>
+          <li><a href="mailto:support@kheyr.app">support@kheyr.app</a></li>
+        </ul>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

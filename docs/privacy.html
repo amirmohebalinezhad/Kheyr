@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Kheyr privacy policy — how we handle SMS data, sync, permissions, and your choices.">
+  <title>Privacy Policy — Kheyr</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header class="site-header">
+    <div class="container nav">
+      <a class="brand" href="index.html">
+        <span class="brand-mark">K</span>
+        <span>Kheyr</span>
+      </a>
+      <nav aria-label="Primary">
+        <ul class="nav-links">
+          <li><a href="index.html">Home</a></li>
+          <li><a class="active" href="privacy.html">Privacy</a></li>
+          <li><a href="security.html">Security</a></li>
+          <li><a href="developers.html">Developers</a></li>
+        </ul>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section class="page-title">
+      <div class="container prose">
+        <h1>Privacy Policy</h1>
+        <p><strong>Effective date:</strong> June 18, 2026 &nbsp;·&nbsp; <strong>Last updated:</strong> June 18, 2026</p>
+        <p>
+          This Privacy Policy describes how Kheyr (“we”, “our”, “the app”) collects, uses, stores,
+          and protects information when you use the Kheyr Android application and related services,
+          including optional cloud sync and the desktop companion app.
+        </p>
+        <p>
+          Contact: <a href="mailto:support@kheyr.app">support@kheyr.app</a>
+        </p>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="container prose">
+        <h2>1. Summary</h2>
+        <ul class="checklist">
+          <li>Kheyr works as your default Android SMS app. Core messaging data is stored locally on your device in an encrypted database.</li>
+          <li>Cloud sync is <strong>opt-in</strong>. SMS message bodies are encrypted on your device before upload; our servers store ciphertext, not readable message content.</li>
+          <li>Spam classification runs on your device using downloaded rule definitions. We do not upload SMS bodies for spam scoring.</li>
+          <li>You can delete cloud data, revoke desktop devices, and delete your account from in-app privacy settings.</li>
+        </ul>
+
+        <h2>2. Information we process</h2>
+
+        <h3>2.1 Local-only use (sync disabled)</h3>
+        <p>When you use Kheyr without enabling sync, the following data stays on your device unless you explicitly share it (for example, by enabling sync later):</p>
+        <ul>
+          <li>SMS and MMS thread metadata and message content</li>
+          <li>Contact names resolved from your address book</li>
+          <li>Spam scores, classifications, and your spam corrections</li>
+          <li>Notification preferences, pinned/archive/mute state, and SIM preferences</li>
+          <li>App settings and onboarding state</li>
+        </ul>
+
+        <h3>2.2 Account and sync (when you opt in)</h3>
+        <p>If you create an account and enable sync, we additionally process:</p>
+        <ul>
+          <li>Phone number used for OTP sign-in</li>
+          <li>Device name, platform, device type, and public key for pairing</li>
+          <li>Encrypted SMS payloads (ciphertext), sync cursors, and limited sync metadata</li>
+          <li>Hashed or encrypted phone identifiers where full numbers are not required</li>
+          <li>Thread state such as spam, pin, archive, read/unread, and notification settings</li>
+          <li>Delete events for messages removed after sync was enabled</li>
+          <li>Desktop pairing sessions, relay requests, and device revocation records</li>
+          <li>Anonymous spam feedback (hashes and rule metadata, not raw message bodies by default)</li>
+        </ul>
+
+        <h3>2.3 Direct messages (when available)</h3>
+        <p>If you use Kheyr direct messaging, message content and attachments may be stored on our servers to deliver messages when recipients are offline. Direct messages in the current release are not end-to-end encrypted. See our <a href="security.html">Security page</a> for details.</p>
+
+        <h3>2.4 Information we do not collect for core SMS</h3>
+        <ul>
+          <li>We do not sell your personal information.</li>
+          <li>We do not upload SMS bodies to classify spam.</li>
+          <li>We do not sync message history that was deleted before you enabled sync.</li>
+        </ul>
+
+        <h2>3. Android permissions</h2>
+        <p>Kheyr requests permissions required for declared functionality:</p>
+        <table>
+          <thead>
+            <tr><th>Permission</th><th>Purpose</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>SMS (read, receive, send)</td><td>Operate as the default SMS app; deliver, display, and send carrier text messages.</td></tr>
+            <tr><td>Contacts</td><td>Display contact names and apply contact-specific notification behavior.</td></tr>
+            <tr><td>Notifications</td><td>Alert you to new messages according to your privacy and spam settings.</td></tr>
+            <tr><td>Phone state</td><td>Identify SIM slots for dual-SIM send and receive routing.</td></tr>
+            <tr><td>Internet</td><td>Download spam rules, optional sync, account sign-in, desktop relay, and direct messages.</td></tr>
+          </tbody>
+        </table>
+
+        <h2>4. How we use information</h2>
+        <ul>
+          <li>Provide SMS send, receive, search, and organization features</li>
+          <li>Apply on-device spam filtering and honor your spam corrections</li>
+          <li>Deliver notifications according to your settings</li>
+          <li>Sync encrypted data across your devices when you enable sync</li>
+          <li>Route desktop SMS send requests to your paired Android phone</li>
+          <li>Authenticate accounts, manage devices, and prevent abuse</li>
+          <li>Improve spam rules using aggregated, anonymized feedback</li>
+          <li>Respond to support requests and legal obligations</li>
+        </ul>
+
+        <h2>5. Legal bases (where applicable)</h2>
+        <p>Depending on your region, we rely on:</p>
+        <ul>
+          <li><strong>Performance of a contract</strong> — to provide the app and optional sync services you request.</li>
+          <li><strong>Consent</strong> — for optional sync, notifications where required, and direct messaging features.</li>
+          <li><strong>Legitimate interests</strong> — to secure our services, prevent abuse, and improve spam protection using minimized data.</li>
+        </ul>
+
+        <h2>6. Storage, retention, and deletion</h2>
+        <ul>
+          <li>Local SMS data remains on your device until you delete it in the app or uninstall Kheyr.</li>
+          <li>Synced ciphertext and metadata are retained while your account is active and sync is enabled.</li>
+          <li>When you delete cloud data or your account, encrypted sync records and associated metadata are removed from our servers according to our deletion workflow.</li>
+          <li>Revoked desktop devices lose API and realtime access immediately.</li>
+          <li>Desktop relay requests that expire unsent are discarded.</li>
+          <li>Server logs and operational metrics may be retained for a limited period for security and reliability.</li>
+        </ul>
+
+        <h2>7. Sharing and subprocessors</h2>
+        <p>We do not sell personal information. We may share data with:</p>
+        <ul>
+          <li>Infrastructure providers that host our API, database, object storage, and push notification services, under contractual confidentiality and security obligations</li>
+          <li>Law enforcement or regulators when required by valid legal process</li>
+        </ul>
+        <p>We minimize shared data: synced SMS bodies remain encrypted; spam feedback avoids raw message content by default.</p>
+
+        <h2>8. International transfers</h2>
+        <p>If you use Kheyr from outside the country where our servers are hosted, your account and sync data may be processed in that hosting region. We apply appropriate safeguards for cross-border transfers where required by law.</p>
+
+        <h2>9. Security</h2>
+        <p>We use TLS for data in transit, access controls on backend systems, device revocation, and client-side encryption for synced SMS bodies. Local message storage uses SQLCipher with keys protected by Android Keystore-backed encrypted preferences. Details are on the <a href="security.html">Security page</a>.</p>
+
+        <h2>10. Your choices and rights</h2>
+        <p>Depending on applicable law, you may have the right to access, export, correct, or delete personal data, restrict or object to certain processing, and withdraw consent where processing is consent-based.</p>
+        <p>In the app you can:</p>
+        <ul>
+          <li>Disable sync or delete cloud data (Settings → Privacy &amp; Security)</li>
+          <li>Export cloud data where the feature is available</li>
+          <li>Revoke paired desktop devices</li>
+          <li>Delete your account</li>
+          <li>Control notification privacy and unknown-sender behavior</li>
+        </ul>
+        <p>To exercise rights not available in-app, contact <a href="mailto:support@kheyr.app">support@kheyr.app</a>. We may verify your request using your registered phone number.</p>
+
+        <h2>11. Children</h2>
+        <p>Kheyr is not directed to children under 13 (or the minimum age in your jurisdiction). We do not knowingly collect personal information from children.</p>
+
+        <h2>12. Changes to this policy</h2>
+        <p>We may update this Privacy Policy from time to time. We will post the revised policy on this page and update the “Last updated” date. Material changes may also be communicated in-app where appropriate.</p>
+
+        <h2>13. Contact</h2>
+        <p>
+          Kheyr<br>
+          Email: <a href="mailto:support@kheyr.app">support@kheyr.app</a><br>
+          Website: <a href="index.html">kheyr.app</a>
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-grid">
+      <div>
+        <a class="brand" href="index.html">
+          <span class="brand-mark">K</span>
+          <span>Kheyr</span>
+        </a>
+        <p>Modern SMS for Android with privacy-first optional sync.</p>
+      </div>
+      <div>
+        <strong>Legal</strong>
+        <ul class="footer-links">
+          <li><a href="privacy.html">Privacy policy</a></li>
+          <li><a href="security.html">Security</a></li>
+        </ul>
+      </div>
+      <div>
+        <strong>Project</strong>
+        <ul class="footer-links">
+          <li><a href="developers.html">Contribute</a></li>
+          <li><a href="https://github.com/amirmohebalinezhad/Kheyr">GitHub repository</a></li>
+          <li><a href="mailto:support@kheyr.app">support@kheyr.app</a></li>
+        </ul>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>
