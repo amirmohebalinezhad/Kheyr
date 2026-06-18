@@ -38,6 +38,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDirection
 import com.kheyr.sms.util.MessageCopyableSegmentDetector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -120,6 +121,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
     var messages by remember { mutableStateOf<List<SmsMessage>>(emptyList()) }
     var composerState by remember { mutableStateOf(SmsComposerState()) }
     var searchQuery by remember { mutableStateOf("") }
+    var threadListFilter by remember { mutableStateOf(ThreadListFilter.All) }
     var conversationSearchQuery by remember { mutableStateOf("") }
     var conversationSearchActive by remember { mutableStateOf(false) }
     var showThreadMenu by remember { mutableStateOf<SmsThread?>(null) }
@@ -542,10 +544,16 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                                 when (pane) {
                                     InboxPane.List -> ThreadFolderScreen(
                                         threads = threads.filter { thread ->
-                                            val searchable = SearchableThread(thread.displayName, thread.address, thread.lastMessage)
-                                            threadSearchMatcher.matches(searchable, searchQuery)
+                                            threadListFilter.matches(thread) &&
+                                                run {
+                                                    val searchable = SearchableThread(thread.displayName, thread.address, thread.lastMessage)
+                                                    threadSearchMatcher.matches(searchable, searchQuery)
+                                                }
                                         },
                                         folder = drawerItem.toFolder(),
+                                        showFilters = drawerItem == DrawerItem.AllMessages,
+                                        threadListFilter = threadListFilter,
+                                        onThreadListFilterChange = { threadListFilter = it },
                                         searchQuery = searchQuery,
                                         onSearchChange = { searchQuery = it },
                                         sims = sims,
@@ -650,13 +658,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                         AppScreen.DesktopSync -> DesktopSyncScreen(apiBaseUrl = ApiConfig.baseUrl, onRevoke = { statusMessage = "Revoke device via Settings when backend is configured." })
                         AppScreen.Help -> HelpScreen()
                         AppScreen.Contacts -> ContactsScreen(
-                            contacts = contacts.filter { contact ->
-                                val query = contactsSearchQuery.trim()
-                                if (query.isBlank()) true else {
-                                    contact.displayName.contains(query, ignoreCase = true) ||
-                                        contact.phoneNumber.contains(query, ignoreCase = true)
-                                }
-                            },
+                            contacts = contacts,
                             loading = contactsLoading,
                             hasPermission = contactsPermissionGranted,
                             searchQuery = contactsSearchQuery,
@@ -707,7 +709,17 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                 onPin = {
                     showThreadMenu = null
                     val pinned = !thread.isPinned
-                    threads = ThreadListOptimisticUpdate.applyPin(threads, thread, pinned)
+                    val updated = ThreadListOptimisticUpdate.applyPin(threads, thread, pinned)
+                    threads = if (folder == ThreadFolder.Inbox) {
+                        ThreadSorter.inboxThreads(updated)
+                    } else {
+                        updated.sortedWith(
+                            compareByDescending<SmsThread> { it.isPinned }
+                                .thenByDescending { it.pinnedAt }
+                                .thenByDescending { it.lastMessageAt },
+                        )
+                    }
+                    threads = ThreadListOptimisticUpdate.filterForFolder(threads, folder)
                     scope.launch { repository.updatePinned(thread.id, pinned) }
                 },
             )
@@ -803,6 +815,9 @@ private fun OnboardingFlow(
 private fun ThreadFolderScreen(
     threads: List<SmsThread>,
     folder: ThreadFolder,
+    showFilters: Boolean,
+    threadListFilter: ThreadListFilter,
+    onThreadListFilterChange: (ThreadListFilter) -> Unit,
     searchQuery: String,
     onSearchChange: (String) -> Unit,
     sims: List<SimCard>,
@@ -813,7 +828,28 @@ private fun ThreadFolderScreen(
     emptyText: String,
 ) {
     Column(Modifier.fillMaxSize()) {
-        OutlinedTextField(value = searchQuery, onValueChange = onSearchChange, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), placeholder = { Text("Search threads") }, singleLine = true, leadingIcon = { Icon(Icons.Default.Search, null) })
+        SearchTextField(
+            value = searchQuery,
+            onValueChange = onSearchChange,
+            placeholder = "Search threads",
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        )
+        if (showFilters) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                ThreadListFilter.entries.forEach { filter ->
+                    FilterChip(
+                        selected = threadListFilter == filter,
+                        onClick = { onThreadListFilterChange(filter) },
+                        label = { Text(threadListFilterLabel(filter)) },
+                    )
+                }
+            }
+        }
         if (loading && threads.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
@@ -829,7 +865,10 @@ private fun ThreadFolderScreen(
                     supportingContent = { Text(row.preview, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     trailingContent = {
                         Column(horizontalAlignment = Alignment.End) {
-                            Text(formatMessageTime(thread.lastMessageAt), style = MaterialTheme.typography.labelSmall)
+                            Text(
+                                formatMessageTime(thread.lastMessageAt),
+                                style = MaterialTheme.typography.labelSmall.copy(textDirection = TextDirection.Rtl),
+                            )
                             row.unreadBadge?.let { Badge { Text(it) } }
                         }
                     },
@@ -893,15 +932,14 @@ private fun ConversationScreenContent(
 
     Column(Modifier.fillMaxSize()) {
         if (searchActive) {
-            OutlinedTextField(
+            SearchTextField(
                 value = searchQuery,
                 onValueChange = onSearchQueryChange,
+                placeholder = "Search in conversation",
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(8.dp)
                     .focusRequester(searchFocusRequester),
-                placeholder = { Text("Search in conversation") },
-                singleLine = true,
             )
         }
         LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -965,6 +1003,7 @@ private fun ConversationBubbleRow(row: ConversationMessageRow, highlight: String
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MessageBubbleContent(row: ConversationMessageRow, highlight: String?, onRetry: () -> Unit, emojiStyle: Boolean) {
+    val context = LocalContext.current
     val clipboard = LocalClipboardManager.current
     var showCopyMenu by remember { mutableStateOf(false) }
     val copyableSegments = remember(row.body) { MessageCopyableSegmentDetector.findAll(row.body) }
@@ -977,6 +1016,14 @@ private fun MessageBubbleContent(row: ConversationMessageRow, highlight: String?
             onDismiss = { showCopyMenu = false },
             onCopy = { text ->
                 clipboard.setText(AnnotatedString(text))
+                showCopyMenu = false
+            },
+            onCall = { number ->
+                context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:$number")))
+                showCopyMenu = false
+            },
+            onSms = { number ->
+                context.startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:$number")))
                 showCopyMenu = false
             },
         )
@@ -996,7 +1043,11 @@ private fun MessageBubbleContent(row: ConversationMessageRow, highlight: String?
         } else {
             HighlightedMessageText(text = row.body, highlight = highlight, modifier = textModifier)
         }
-        Text(row.timeLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            row.timeLabel,
+            style = MaterialTheme.typography.labelSmall.copy(textDirection = TextDirection.Rtl),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
         row.copyableCode?.let { code ->
             TextButton(
                 onClick = { clipboard.setText(AnnotatedString(code)) },
@@ -1141,6 +1192,18 @@ private fun ContactsScreen(
     onRequestPermission: () -> Unit,
     onContactClick: (DeviceContact) -> Unit,
 ) {
+    val filteredContacts = remember(contacts, searchQuery) {
+        val query = searchQuery.trim()
+        if (query.isBlank()) {
+            contacts
+        } else {
+            contacts.filter { contact ->
+                contact.displayName.contains(query, ignoreCase = true) ||
+                    contact.phoneNumber.contains(query, ignoreCase = true)
+            }
+        }
+    }
+
     when {
         !hasPermission -> {
             Column(
@@ -1165,21 +1228,19 @@ private fun ContactsScreen(
         }
         else -> {
             Column(Modifier.fillMaxSize()) {
-                OutlinedTextField(
+                SearchTextField(
                     value = searchQuery,
                     onValueChange = onSearchChange,
+                    placeholder = "Search contacts",
                     modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-                    placeholder = { Text("Search contacts") },
-                    singleLine = true,
-                    leadingIcon = { Icon(Icons.Default.Search, null) },
                 )
-                if (contacts.isEmpty()) {
+                if (filteredContacts.isEmpty()) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                         Text("No contacts match your search")
                     }
                 } else {
                     LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
-                        items(contacts, key = { "${it.id}:${it.phoneNumber}" }) { contact ->
+                        items(filteredContacts, key = { "${it.id}:${it.phoneNumber}" }) { contact ->
                             ListItem(
                                 headlineContent = { Text(contact.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis) },
                                 supportingContent = { Text(contact.phoneNumber) },
@@ -1228,3 +1289,34 @@ private fun requiredPermissions(): Array<String> = buildList {
 }.toTypedArray()
 
 private fun formatMessageTime(instant: Instant): String = JalaliDateFormatter.format(instant)
+
+private fun threadListFilterLabel(filter: ThreadListFilter): String = when (filter) {
+    ThreadListFilter.All -> "All"
+    ThreadListFilter.Unread -> "Unread"
+    ThreadListFilter.Contacts -> "Contacts"
+}
+
+@Composable
+private fun SearchTextField(
+    value: String,
+    onValueChange: (String) -> Unit,
+    placeholder: String,
+    modifier: Modifier = Modifier,
+    focusRequester: FocusRequester? = null,
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onValueChange,
+        modifier = modifier.then(focusRequester?.let { Modifier.focusRequester(it) } ?: Modifier),
+        placeholder = { Text(placeholder) },
+        singleLine = true,
+        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+        trailingIcon = {
+            if (value.isNotEmpty()) {
+                IconButton(onClick = { onValueChange("") }) {
+                    Icon(Icons.Default.Close, contentDescription = "Clear search")
+                }
+            }
+        },
+    )
+}

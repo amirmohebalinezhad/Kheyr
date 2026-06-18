@@ -17,7 +17,7 @@ data class CopyableSegment(
 object MessageCopyableSegmentDetector {
     private val digit = """[0-9۰-۹٠-٩]"""
     private val ibanPattern = Regex("""(?i)([A-Z]{2}[\s\-]?$digit{2}(?:[\s\-]*[0-9A-Z۰-۹٠-٩]){11,28})""")
-    private val cardPattern = Regex("""(?:($digit{4}[\s\-]?){3}$digit{4,7}|$digit{13,19})""")
+    private val cardPattern = Regex("""(?:($digit{4}[\s\-_]?){3}$digit{4,7}|$digit{13,19})""")
     private val phonePattern = Regex("""(\+?$digit[\s\-().]*$digit(?:[\s\-().]*$digit){5,14})""")
 
     fun findAll(text: String): List<CopyableSegment> {
@@ -47,10 +47,24 @@ object MessageCopyableSegmentDetector {
         CopyableSegment(
             kind = kind,
             raw = raw,
-            normalized = DigitNormalizer.toAsciiDigits(raw),
+            normalized = normalizedForCopy(kind, raw),
             start = start,
             end = end,
         )
+
+    private fun normalizedForCopy(kind: CopyableSegmentKind, raw: String): String = when (kind) {
+        CopyableSegmentKind.Phone -> DigitNormalizer.toAsciiDigits(raw)
+        CopyableSegmentKind.Iban -> {
+            val compact = DigitNormalizer.toAsciiDigits(raw).replace(Regex("[\\s\\-_]"), "").uppercase()
+            val digits = if (compact.startsWith("IR")) {
+                compact.drop(2).filter { it.isDigit() }
+            } else {
+                DigitNormalizer.digitsOnly(raw)
+            }
+            if (digits.length >= 24) digits.take(24) else digits
+        }
+        CopyableSegmentKind.CardNumber -> DigitNormalizer.digitsOnly(raw)
+    }
 
     private fun overlaps(segments: List<CopyableSegment>, range: IntRange): Boolean =
         segments.any { range.first < it.end && range.last + 1 > it.start }
