@@ -53,6 +53,17 @@
             </intent-filter>
         </receiver>
 
+        <activity
+            android:name=".CopyCodeActivity"
+            android:excludeFromRecents="true"
+            android:exported="false"
+            android:taskAffinity=""
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
+        <receiver
+            android:name=".receiver.NotificationActionReceiver"
+            android:exported="false" />
+
         <receiver
             android:name=".receiver.SmsSendStatusReceiver"
             android:exported="false">

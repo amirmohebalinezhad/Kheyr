@@ -17,15 +17,20 @@ import android.provider.ContactsContract
 import android.provider.Telephony
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.app.RemoteInput
 import androidx.core.content.ContextCompat
+import com.kheyr.sms.CopyCodeActivity
 import com.kheyr.sms.MainActivity
+import com.kheyr.sms.R
 import com.kheyr.sms.contacts.ContactRepository
 import com.kheyr.sms.contacts.PhoneNumberNormalizer
 import com.kheyr.sms.data.AppDatabase
 import com.kheyr.sms.data.SmsRepository
 import com.kheyr.sms.domain.SpamClassification
 import com.kheyr.sms.domain.SpamRuleSet
+import com.kheyr.sms.notifications.IncomingNotificationActions
 import com.kheyr.sms.preferences.AppPreferences
+import com.kheyr.sms.settings.NotificationContentMode
 import com.kheyr.sms.settings.NotificationPolicyResolver
 import com.kheyr.sms.settings.ThreadNotificationSettings
 import com.kheyr.sms.telephony.OwnNumberResolver
@@ -145,16 +150,83 @@ class PolicyAwareIncomingSmsNotifier(
             .setContentTitle(decision.title)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-        decision.body?.let(builder::setContentText)
+            .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+            // PRIORITY_HIGH drives heads-up (pop-up) display on pre-O; the HIGH-importance channel does it on O+.
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+        decision.body?.let {
+            builder.setContentText(it)
+            // BigTextStyle expands to show the full message text instead of a single truncated line.
+            builder.setStyle(NotificationCompat.BigTextStyle().bigText(it))
+        }
         if (decision.soundMode == com.kheyr.sms.settings.NotificationSoundMode.Silent) {
             builder.setSilent(true)
         } else if (decision.vibrate) {
             builder.setDefaults(NotificationCompat.DEFAULT_VIBRATE)
         }
         profile?.photoUri?.let { loadNotificationIcon(it) }?.let(builder::setLargeIcon)
+        val previewVisible = globalSettings.contentMode == NotificationContentMode.ShowSenderAndPreview
+        addActions(builder, message, notificationId, previewVisible)
         NotificationManagerCompat.from(context).notify(notificationId, builder.build())
     }
+
+    private fun addActions(
+        builder: NotificationCompat.Builder,
+        message: StoredIncomingSms,
+        notificationId: Int,
+        previewVisible: Boolean,
+    ) {
+        // "Copy code" is the primary action for OTP messages, but only when previews are visible so a
+        // hidden-content notification never leaks a verification code.
+        val code = if (previewVisible) IncomingNotificationActions.copyableCode(message.body) else null
+        if (code != null) {
+            val copyIntent = Intent(context, CopyCodeActivity::class.java).putExtra(CopyCodeActivity.EXTRA_CODE, code)
+            val copyPending = PendingIntent.getActivity(
+                context,
+                notificationId * 4 + 1,
+                copyIntent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+            )
+            builder.addAction(android.R.drawable.ic_menu_save, context.getString(R.string.notification_action_copy_code), copyPending)
+        }
+
+        val remoteInput = RemoteInput.Builder(NotificationActionReceiver.KEY_REPLY_TEXT)
+            .setLabel(context.getString(R.string.notification_reply_hint))
+            .build()
+        val replyIntent = actionIntent(NotificationActionReceiver.ACTION_REPLY, message, notificationId)
+        val replyPending = PendingIntent.getBroadcast(
+            context,
+            notificationId * 4 + 2,
+            replyIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
+        )
+        val replyAction = NotificationCompat.Action.Builder(
+            android.R.drawable.ic_menu_send,
+            context.getString(R.string.notification_action_reply),
+            replyPending,
+        )
+            .addRemoteInput(remoteInput)
+            .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY)
+            .setAllowGeneratedReplies(true)
+            .build()
+        builder.addAction(replyAction)
+
+        val markReadIntent = actionIntent(NotificationActionReceiver.ACTION_MARK_READ, message, notificationId)
+        val markReadPending = PendingIntent.getBroadcast(
+            context,
+            notificationId * 4 + 3,
+            markReadIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        builder.addAction(android.R.drawable.ic_menu_view, context.getString(R.string.notification_action_mark_read), markReadPending)
+    }
+
+    private fun actionIntent(action: String, message: StoredIncomingSms, notificationId: Int): Intent =
+        Intent(context, NotificationActionReceiver::class.java)
+            .setAction(action)
+            .putExtra(NotificationActionReceiver.EXTRA_THREAD_ID, message.threadId)
+            .putExtra(NotificationActionReceiver.EXTRA_NOTIFICATION_ID, notificationId)
+            .putExtra(NotificationActionReceiver.EXTRA_RECIPIENT, message.sender)
+            .apply { message.subscriptionId?.let { putExtra(NotificationActionReceiver.EXTRA_SUBSCRIPTION_ID, it) } }
 
     private fun canPostNotifications(): Boolean {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -172,13 +244,13 @@ class PolicyAwareIncomingSmsNotifier(
     private fun stableNotificationId(threadId: Long): Int = (threadId xor (threadId ushr 32)).toInt()
 
     private fun ensureChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            context.getSystemService(NotificationManager::class.java)
-                .createNotificationChannel(NotificationChannel(CHANNEL_ID, "Messages", NotificationManager.IMPORTANCE_DEFAULT))
-        }
+        // IMPORTANCE_HIGH is required for heads-up (pop-up) notifications on API 26+. A channel's
+        // importance is fixed once created, so a new id is used to upgrade existing installs.
+        val channel = NotificationChannel(CHANNEL_ID, "Messages", NotificationManager.IMPORTANCE_HIGH)
+        context.getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
     }
 
-    private companion object { const val CHANNEL_ID = "incoming_sms" }
+    private companion object { const val CHANNEL_ID = "incoming_sms_messages" }
 }
 
 class AndroidContactLookup(private val context: Context) : SenderContactLookup {
