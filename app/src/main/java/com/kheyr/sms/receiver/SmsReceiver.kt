@@ -7,6 +7,13 @@ import android.content.Intent
 class SmsReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val message = SmsReceiveHandlerFactory.parseIncoming(intent) ?: return
-        SmsReceiveHandlerFactory.create(context).handle(message)
+        val pendingResult = goAsync()
+        Thread {
+            try {
+                SmsReceiveHandlerFactory.create(context).handle(message)
+            } finally {
+                pendingResult.finish()
+            }
+        }.start()
     }
 }

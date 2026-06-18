@@ -76,6 +76,30 @@ class SmsDaoTest {
         assertEquals("second", dao.inboxThreads().single().lastMessage)
     }
 
+    @Test fun sendStatusCanBeUpdatedByTelephonyId() {
+        dao.upsertTelephonyMessage(
+            message(threadId = 1, direction = MessageDirection.Outgoing, status = MessageStatus.Sending, read = true)
+                .copy(telephonyId = 77),
+        )
+
+        dao.updateSendStatusByTelephonyId(77, MessageStatus.Sent)
+
+        assertEquals(MessageStatus.Sent, dao.messageByTelephonyId(77)?.status)
+    }
+
+    @Test fun recentOutgoingTelephonyIdsReturnsUndeliveredOutgoingMessages() {
+        dao.upsertTelephonyMessage(
+            message(threadId = 1, direction = MessageDirection.Outgoing, status = MessageStatus.Sending, read = true)
+                .copy(telephonyId = 11),
+        )
+        dao.upsertTelephonyMessage(
+            message(threadId = 2, direction = MessageDirection.Outgoing, status = MessageStatus.Delivered, read = true)
+                .copy(telephonyId = 12),
+        )
+
+        assertEquals(listOf(11L), dao.recentOutgoingTelephonyIds(10))
+    }
+
     @Test fun sendStatusCanBeUpdatedAfterOutgoingInsert() {
         val messageId = dao.insertOutgoingSms(message(threadId = 1, direction = MessageDirection.Outgoing, status = MessageStatus.Sending, read = true))
 

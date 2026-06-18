@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Telephony
+import androidx.activity.compose.BackHandler
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -25,7 +26,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -36,6 +41,8 @@ import com.kheyr.sms.KheyrApplication
 import com.kheyr.sms.api.ApiConfig
 import com.kheyr.sms.api.KheyrApiService
 import com.kheyr.sms.conversation.ConversationSearchMatcher
+import com.kheyr.sms.contacts.ContactRepository
+import com.kheyr.sms.contacts.DeviceContact
 import com.kheyr.sms.conversation.SearchableMessage
 import com.kheyr.sms.data.SmsMessage
 import com.kheyr.sms.data.SmsRepository
@@ -64,8 +71,8 @@ import com.kheyr.sms.worker.KheyrWorkerScheduler
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.launch
-import java.time.ZoneId
-import java.time.format.DateTimeFormatter
+import com.kheyr.sms.util.JalaliDateFormatter
+import java.time.Instant
 
 enum class AppScreen { Onboarding, Threads, Conversation, Settings, SettingsDetail, DesktopSync, Help, Contacts }
 
@@ -76,6 +83,7 @@ fun KheyrAppShell() {
     val app = context.applicationContext as KheyrApplication
     val preferences = app.preferences
     val repository = remember { SmsRepository(context) }
+    val contactRepository = remember { ContactRepository(context) }
     val simRepository = remember { SimRepository(context) }
     val sender = remember { SmsSender(context) }
     val api = remember { KheyrApiService(tokenProvider = { preferences.authTokens().first }) }
@@ -90,6 +98,10 @@ fun KheyrAppShell() {
     var drawerItem by remember { mutableStateOf(DrawerItem.AllMessages) }
     var settingsCategory by remember { mutableStateOf<SettingsCategory?>(null) }
     var threads by remember { mutableStateOf<List<SmsThread>>(emptyList()) }
+    var threadsLoading by remember { mutableStateOf(false) }
+    var contacts by remember { mutableStateOf<List<DeviceContact>>(emptyList()) }
+    var contactsLoading by remember { mutableStateOf(false) }
+    var contactsSearchQuery by remember { mutableStateOf("") }
     var selectedThread by remember { mutableStateOf<SmsThread?>(null) }
     var messages by remember { mutableStateOf<List<SmsMessage>>(emptyList()) }
     var composerState by remember { mutableStateOf(SmsComposerState()) }
@@ -103,18 +115,29 @@ fun KheyrAppShell() {
         if (drawerOpen) drawerState.open() else drawerState.close()
     }
     var isDefaultSms by remember { mutableStateOf(DefaultSmsRoleChecker.isDefaultSmsApp(context)) }
+    var smsPermissionGranted by remember {
+        mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED)
+    }
+    var contactsPermissionGranted by remember {
+        mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED)
+    }
+    var sims by remember { mutableStateOf<List<SimCard>>(emptyList()) }
     val activity = context as? ComponentActivity
     DisposableEffect(activity) {
         val lifecycle = activity?.lifecycle ?: return@DisposableEffect onDispose {}
         val observer = LifecycleEventObserver { _, event ->
             if (event == Lifecycle.Event.ON_RESUME) {
                 isDefaultSms = DefaultSmsRoleChecker.isDefaultSmsApp(context)
+                smsPermissionGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED
+                contactsPermissionGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
+                if (smsPermissionGranted) {
+                    sims = simRepository.activeSims()
+                }
             }
         }
         lifecycle.addObserver(observer)
         onDispose { lifecycle.removeObserver(observer) }
     }
-    var sims by remember { mutableStateOf<List<SimCard>>(emptyList()) }
     var notificationSettings by remember { mutableStateOf(preferences.notificationSettings()) }
     var themePreference by remember { mutableStateOf(preferences.themePreference) }
     var syncEnabled by remember { mutableStateOf(preferences.syncSettings().enabled) }
@@ -127,34 +150,144 @@ fun KheyrAppShell() {
     val darkTheme = ThemePreferenceResolver.isDark(themePreference, systemDark)
     val colorScheme = if (darkTheme) darkColorScheme(primary = androidx.compose.ui.graphics.Color(0xFF0F8B8D)) else lightColorScheme(primary = androidx.compose.ui.graphics.Color(0xFF0F8B8D))
 
-    fun hasPermission(permission: String) = ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
-    fun gateState() = OnboardingGateState(isDefaultSms, hasPermission(Manifest.permission.READ_SMS), hasPermission(Manifest.permission.READ_CONTACTS), hasPermission(Manifest.permission.POST_NOTIFICATIONS) || Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU)
-    fun refreshThreads() {
-        if (!hasPermission(Manifest.permission.READ_SMS)) return
+    fun openConversation(thread: SmsThread) {
+        selectedThread = thread
+        messages = emptyList()
+        conversationSearchActive = false
+        conversationSearchQuery = ""
+        composerState = SmsComposerState(
+            selectedSubscriptionId = thread.simSlot ?: preferences.defaultSubscriptionId ?: sims.firstOrNull()?.subscriptionId,
+            requiresSimSelection = sims.size > 1,
+        )
+        screen = AppScreen.Conversation
         scope.launch {
-            val loaded = when (drawerItem) {
-                DrawerItem.AllMessages -> repository.loadThreads().let(ThreadSorter::inboxThreads)
-                DrawerItem.Spam -> repository.loadSpamThreads()
-                DrawerItem.Archived -> repository.loadArchivedThreads()
-                DrawerItem.Pinned -> repository.loadPinnedThreads()
-                else -> repository.loadThreads()
+            repository.markThreadRead(thread.id)
+            messages = repository.loadLocalMessages(thread.id)
+        }
+    }
+
+    fun openConversationForContact(contact: DeviceContact) {
+        val existing = threads.firstOrNull { contactRepository.matchesAddress(it.address, contact.phoneNumber) }
+        val threadId = existing?.id ?: Telephony.Threads.getOrCreateThreadId(context, setOf(contact.phoneNumber))
+        openConversation(
+            existing?.copy(displayName = contact.displayName, contactPhotoUri = contact.photoUri)
+                ?: SmsThread(
+                    id = threadId,
+                    address = contact.phoneNumber,
+                    displayName = contact.displayName,
+                    lastMessage = "",
+                    lastMessageAt = Instant.now(),
+                    contactPhotoUri = contact.photoUri,
+                ),
+        )
+    }
+
+    fun navigateBack() {
+        when {
+            screen == AppScreen.Conversation -> {
+                scope.launch {
+                    selectedThread?.id?.let { repository.markThreadRead(it) }
+                    selectedThread = null
+                    screen = AppScreen.Threads
+                    conversationSearchActive = false
+                    conversationSearchQuery = ""
+                }
             }
-            threads = loaded
+            screen == AppScreen.SettingsDetail -> screen = AppScreen.Settings
+            screen in listOf(AppScreen.Settings, AppScreen.DesktopSync, AppScreen.Help, AppScreen.Contacts) -> {
+                screen = AppScreen.Threads
+                drawerItem = DrawerItem.AllMessages
+            }
+            drawerOpen -> {
+                drawerOpen = false
+                scope.launch { drawerState.close() }
+            }
+        }
+    }
+
+    val handleSystemBack = screen != AppScreen.Onboarding && (
+        screen == AppScreen.Conversation ||
+            screen == AppScreen.SettingsDetail ||
+            screen in listOf(AppScreen.Settings, AppScreen.DesktopSync, AppScreen.Help, AppScreen.Contacts) ||
+            drawerOpen
+        )
+
+    BackHandler(enabled = handleSystemBack) { navigateBack() }
+
+    fun hasPermission(permission: String) = ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
+    fun gateState() = OnboardingGateState(isDefaultSms, smsPermissionGranted, contactsPermissionGranted, hasPermission(Manifest.permission.POST_NOTIFICATIONS) || Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU)
+
+    suspend fun loadThreadsForDrawer(): List<SmsThread> {
+        val loaded = when (drawerItem) {
+            DrawerItem.AllMessages -> repository.loadLocalThreads().let(ThreadSorter::inboxThreads)
+            DrawerItem.Spam -> repository.loadSpamThreads()
+            DrawerItem.Archived -> repository.loadArchivedThreads()
+            DrawerItem.Pinned -> repository.loadPinnedThreads()
+            else -> repository.loadLocalThreads()
+        }
+        return contactRepository.enrichThreads(loaded)
+    }
+
+    fun refreshContacts() {
+        if (!contactsPermissionGranted) {
+            contacts = emptyList()
+            return
+        }
+        scope.launch {
+            contactsLoading = true
+            try {
+                contacts = contactRepository.loadContacts()
+            } finally {
+                contactsLoading = false
+            }
+        }
+    }
+
+    fun refreshThreadsLocal() {
+        if (!smsPermissionGranted) return
+        scope.launch {
+            threads = loadThreadsForDrawer()
+        }
+    }
+
+    fun syncThreadsInBackground() {
+        if (!smsPermissionGranted) return
+        scope.launch {
+            repository.syncTelephonyMessages()
+            threads = loadThreadsForDrawer()
+        }
+    }
+
+    fun refreshThreads() {
+        if (!smsPermissionGranted) return
+        scope.launch {
+            threadsLoading = threads.isEmpty()
+            try {
+                threads = loadThreadsForDrawer()
+            } finally {
+                threadsLoading = false
+            }
+            repository.syncTelephonyMessages()
+            threads = loadThreadsForDrawer()
             selectedThread?.let { current ->
                 val loadedMessages = repository.loadLocalMessages(current.id)
                 if (selectedThread?.id == current.id) {
                     messages = loadedMessages
-                    selectedThread = loaded.firstOrNull { it.id == current.id } ?: current
+                    selectedThread = threads.firstOrNull { it.id == current.id } ?: current
                 }
             }
         }
     }
     fun List<SmsThread>.filterOrFind(id: Long) = firstOrNull { it.id == id }
 
-    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+    val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { results ->
+        smsPermissionGranted = results[Manifest.permission.READ_SMS] == true || hasPermission(Manifest.permission.READ_SMS)
+        contactsPermissionGranted = results[Manifest.permission.READ_CONTACTS] == true || hasPermission(Manifest.permission.READ_CONTACTS)
+        contactRepository.invalidateCache()
         sims = simRepository.activeSims()
         composerState = composerState.copy(requiresSimSelection = sims.size > 1, selectedSubscriptionId = preferences.defaultSubscriptionId ?: sims.firstOrNull()?.subscriptionId)
         refreshThreads()
+        refreshContacts()
     }
     val roleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         isDefaultSms = DefaultSmsRoleChecker.isDefaultSmsApp(context)
@@ -162,10 +295,27 @@ fun KheyrAppShell() {
     }
 
     LaunchedEffect(drawerItem, screen) {
-        if (screen == AppScreen.Threads) refreshThreads()
+        if (screen == AppScreen.Threads) {
+            refreshThreadsLocal()
+            syncThreadsInBackground()
+        }
     }
 
-    MaterialTheme(colorScheme = colorScheme) {
+    LaunchedEffect(screen, contactsPermissionGranted) {
+        if (screen == AppScreen.Contacts) refreshContacts()
+    }
+
+    LaunchedEffect(Unit) {
+        if (smsPermissionGranted) {
+            sims = simRepository.activeSims()
+            composerState = composerState.copy(
+                requiresSimSelection = sims.size > 1,
+                selectedSubscriptionId = preferences.defaultSubscriptionId ?: sims.firstOrNull()?.subscriptionId,
+            )
+        }
+    }
+
+    MaterialTheme(colorScheme = colorScheme, typography = KheyrTypography.typography) {
         ModalNavigationDrawer(
             drawerState = drawerState,
             gesturesEnabled = screen == AppScreen.Threads && selectedThread == null,
@@ -200,30 +350,32 @@ fun KheyrAppShell() {
                 topBar = {
                     TopAppBar(
                         title = {
-                            Text(
-                                when {
-                                    screen == AppScreen.Conversation -> selectedThread?.displayName?.ifBlank { selectedThread?.address.orEmpty() }.orEmpty()
-                                    screen == AppScreen.Settings -> "Settings"
-                                    screen == AppScreen.DesktopSync -> "Desktop Sync"
-                                    screen == AppScreen.Help -> "Help & Feedback"
-                                    screen == AppScreen.Contacts -> "Contacts"
-                                    else -> drawerItem.title
-                                },
-                            )
+                            when {
+                                screen == AppScreen.Conversation -> {
+                                    val thread = selectedThread
+                                    if (thread != null) {
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            ContactAvatar(
+                                                displayName = thread.displayName.ifBlank { thread.address },
+                                                photoUri = thread.contactPhotoUri,
+                                                size = 32.dp,
+                                            )
+                                            Text(thread.displayName.ifBlank { thread.address })
+                                        }
+                                    }
+                                }
+                                screen == AppScreen.Settings -> Text("Settings")
+                                screen == AppScreen.DesktopSync -> Text("Desktop Sync")
+                                screen == AppScreen.Help -> Text("Help & Feedback")
+                                screen == AppScreen.Contacts -> Text("Contacts")
+                                else -> Text(drawerItem.title)
+                            }
                         },
                         navigationIcon = {
                             when {
-                                screen == AppScreen.Conversation -> IconButton(onClick = {
-                                    scope.launch {
-                                        selectedThread?.id?.let { repository.markThreadRead(it) }
-                                        selectedThread = null
-                                        screen = AppScreen.Threads
-                                        conversationSearchActive = false
-                                        refreshThreads()
-                                    }
-                                }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+                                screen == AppScreen.Conversation -> IconButton(onClick = { navigateBack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
                                 screen == AppScreen.SettingsDetail -> IconButton(onClick = { screen = AppScreen.Settings }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
-                                screen in listOf(AppScreen.Settings, AppScreen.DesktopSync, AppScreen.Help, AppScreen.Contacts) -> IconButton(onClick = { screen = AppScreen.Threads; drawerItem = DrawerItem.AllMessages }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+                                screen in listOf(AppScreen.Settings, AppScreen.DesktopSync, AppScreen.Help, AppScreen.Contacts) -> IconButton(onClick = { navigateBack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
                                 screen == AppScreen.Threads && selectedThread == null -> IconButton(onClick = { drawerOpen = true }) { Icon(Icons.Default.Menu, "Menu") }
                             }
                         },
@@ -283,22 +435,16 @@ fun KheyrAppShell() {
                                     onSearchChange = { searchQuery = it },
                                     sims = sims,
                                     mapper = threadRowMapper,
-                                    onThreadClick = { thread ->
-                                        selectedThread = thread
-                                        messages = emptyList()
-                                        composerState = SmsComposerState(selectedSubscriptionId = thread.simSlot ?: preferences.defaultSubscriptionId ?: sims.firstOrNull()?.subscriptionId, requiresSimSelection = sims.size > 1)
-                                        scope.launch {
-                                            repository.markThreadRead(thread.id)
-                                            messages = repository.loadLocalMessages(thread.id)
-                                        }
-                                        screen = AppScreen.Conversation
-                                    },
+                                    loading = threadsLoading,
+                                    onThreadClick = { openConversation(it) },
                                     onThreadLongPress = { showThreadMenu = it },
-                                    emptyText = when (drawerItem) {
-                                        DrawerItem.Spam -> "No spam messages"
-                                        DrawerItem.Archived -> "No archived conversations"
-                                        DrawerItem.Pinned -> "No pinned conversations"
-                                        else -> "Grant SMS access to load conversations"
+                                    emptyText = when {
+                                        threadsLoading -> "Loading conversations..."
+                                        !smsPermissionGranted -> "Grant SMS access to load conversations"
+                                        drawerItem == DrawerItem.Spam -> "No spam messages"
+                                        drawerItem == DrawerItem.Archived -> "No archived conversations"
+                                        drawerItem == DrawerItem.Pinned -> "No pinned conversations"
+                                        else -> "No conversations yet"
                                     },
                                 )
                             }
@@ -320,19 +466,22 @@ fun KheyrAppShell() {
                                     if (state.error != null) return@ConversationScreenContent
                                     val text = state.body.trim()
                                     scope.launch {
-                                        val messageId = repository.persistOutgoing(thread.address, text, state.selectedSubscriptionId)
-                                        repository.markSending(messageId)
-                                        sender.send(SmsSendRequest(thread.address, text, state.selectedSubscriptionId, messageId))
+                                        val telephonyId = repository.persistOutgoing(thread.address, text, state.selectedSubscriptionId)
+                                        repository.markSending(telephonyId)
+                                        repository.syncTelephonyMessagesByIds(listOf(telephonyId))
+                                        sender.send(SmsSendRequest(thread.address, text, state.selectedSubscriptionId, telephonyId))
                                         composerState = composerReducer.reduce(state, SmsComposerEvent.SendCompleted)
                                         messages = repository.loadLocalMessages(thread.id)
-                                        refreshThreads()
+                                        refreshThreadsLocal()
                                     }
                                 },
                                 onRetry = { messageId ->
                                     val message = messages.firstOrNull { it.id == messageId } ?: return@ConversationScreenContent
+                                    val telephonyId = message.telephonyId ?: return@ConversationScreenContent
                                     scope.launch {
-                                        repository.markSending(message.id)
-                                        sender.send(SmsSendRequest(message.address, message.body, message.simSlot, message.id))
+                                        repository.markSending(telephonyId)
+                                        sender.send(SmsSendRequest(message.address, message.body, message.simSlot, telephonyId))
+                                        repository.syncTelephonyMessagesByIds(listOf(telephonyId))
                                         messages = repository.loadLocalMessages(thread.id)
                                     }
                                 },
@@ -361,7 +510,21 @@ fun KheyrAppShell() {
                         }
                         AppScreen.DesktopSync -> DesktopSyncScreen(apiBaseUrl = ApiConfig.baseUrl, onRevoke = { statusMessage = "Revoke device via Settings when backend is configured." })
                         AppScreen.Help -> HelpScreen()
-                        AppScreen.Contacts -> ContactsPlaceholderScreen()
+                        AppScreen.Contacts -> ContactsScreen(
+                            contacts = contacts.filter { contact ->
+                                val query = contactsSearchQuery.trim()
+                                if (query.isBlank()) true else {
+                                    contact.displayName.contains(query, ignoreCase = true) ||
+                                        contact.phoneNumber.contains(query, ignoreCase = true)
+                                }
+                            },
+                            loading = contactsLoading,
+                            hasPermission = contactsPermissionGranted,
+                            searchQuery = contactsSearchQuery,
+                            onSearchChange = { contactsSearchQuery = it },
+                            onRequestPermission = { permissionLauncher.launch(requiredPermissions()) },
+                            onContactClick = { openConversationForContact(it) },
+                        )
                     }
                     statusMessage?.let { msg ->
                         Surface(
@@ -380,21 +543,30 @@ fun KheyrAppShell() {
         }
 
         showThreadMenu?.let { thread ->
+            val folder = drawerItem.toFolder()
             ThreadActionDialog(
                 thread = thread,
                 onDismiss = { showThreadMenu = null },
                 onAction = { action ->
-                    when (action) {
-                        ThreadBulkAction.MarkRead -> repository.markThreadRead(thread.id)
-                        ThreadBulkAction.Archive -> repository.updateArchived(thread.id, !thread.isArchived)
-                        ThreadBulkAction.MarkSpam -> repository.updateSpam(thread.id, !thread.isSpam)
-                        ThreadBulkAction.Mute -> repository.updateMuted(thread.id, !thread.isMuted)
-                        ThreadBulkAction.Delete -> repository.deleteThreadMessages(thread.id)
-                    }
                     showThreadMenu = null
-                    refreshThreads()
+                    threads = ThreadListOptimisticUpdate.applyAction(threads, thread, action)
+                    threads = ThreadListOptimisticUpdate.filterForFolder(threads, folder)
+                    scope.launch {
+                        when (action) {
+                            ThreadBulkAction.MarkRead -> repository.markThreadRead(thread.id)
+                            ThreadBulkAction.Archive -> repository.updateArchived(thread.id, !thread.isArchived)
+                            ThreadBulkAction.MarkSpam -> repository.updateSpam(thread.id, !thread.isSpam)
+                            ThreadBulkAction.Mute -> repository.updateMuted(thread.id, !thread.isMuted)
+                            ThreadBulkAction.Delete -> repository.deleteThreadMessages(thread.id)
+                        }
+                    }
                 },
-                onPin = { repository.updatePinned(thread.id, !thread.isPinned); showThreadMenu = null; refreshThreads() },
+                onPin = {
+                    showThreadMenu = null
+                    val pinned = !thread.isPinned
+                    threads = ThreadListOptimisticUpdate.applyPin(threads, thread, pinned)
+                    scope.launch { repository.updatePinned(thread.id, pinned) }
+                },
             )
         }
     }
@@ -455,8 +627,11 @@ private fun OnboardingFlow(
             }
             2 -> {
                 Text("Grant SMS, contacts, and notification permissions.")
-                if (gate.missingRequirements.isNotEmpty()) Button(onClick = onRequestPermissions, modifier = Modifier.fillMaxWidth()) { Text("Grant permissions") }
-                else Text("All permissions granted.", color = MaterialTheme.colorScheme.primary)
+                if (gate.missingRequirements.isNotEmpty()) {
+                    Button(onClick = onRequestPermissions, modifier = Modifier.fillMaxWidth()) { Text("Grant permissions") }
+                } else {
+                    Text("All permissions granted.", color = MaterialTheme.colorScheme.primary)
+                }
                 val ready = gate.canUseFullSmsFeatures
                 Button(onClick = { onStepChange(3) }, enabled = ready, modifier = Modifier.fillMaxWidth()) { Text("Continue") }
             }
@@ -489,15 +664,22 @@ private fun ThreadFolderScreen(
     onSearchChange: (String) -> Unit,
     sims: List<SimCard>,
     mapper: ThreadRowPresentationMapper,
+    loading: Boolean,
     onThreadClick: (SmsThread) -> Unit,
     onThreadLongPress: (SmsThread) -> Unit,
     emptyText: String,
 ) {
     Column(Modifier.fillMaxSize()) {
         OutlinedTextField(value = searchQuery, onValueChange = onSearchChange, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), placeholder = { Text("Search threads") }, singleLine = true, leadingIcon = { Icon(Icons.Default.Search, null) })
-        if (threads.isEmpty()) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(emptyText) }
-        else LazyColumn {
-            items(threads, key = { it.id }) { thread ->
+        if (loading && threads.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+        } else if (threads.isEmpty()) {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(emptyText) }
+        } else {
+            LazyColumn {
+                items(threads, key = { it.id }) { thread ->
                 val row = mapper.map(thread, folder, sims)
                 ListItem(
                     headlineContent = { Text(row.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
@@ -509,9 +691,10 @@ private fun ThreadFolderScreen(
                         }
                     },
                     leadingContent = {
-                        Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(40.dp)) {
-                            Box(contentAlignment = Alignment.Center) { Text(row.title.take(1).uppercase()) }
-                        }
+                        ContactAvatar(
+                            displayName = row.title,
+                            photoUri = thread.contactPhotoUri,
+                        )
                     },
                     overlineContent = {
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -524,6 +707,7 @@ private fun ThreadFolderScreen(
                     modifier = Modifier.fillMaxWidth().combinedClickable(onClick = { onThreadClick(thread) }, onLongClick = { onThreadLongPress(thread) }),
                 )
                 HorizontalDivider()
+                }
             }
         }
     }
@@ -543,38 +727,93 @@ private fun ConversationScreenContent(
     onRetry: (Long) -> Unit,
 ) {
     val listState = rememberLazyListState()
+    val searchFocusRequester = remember { FocusRequester() }
     val visibleMessages = if (searchActive && searchQuery.isNotBlank()) screen.messages.filter { it.id in matchingIds } else screen.messages
-    LaunchedEffect(visibleMessages.size) { if (visibleMessages.isNotEmpty()) listState.animateScrollToItem(visibleMessages.lastIndex) }
+    val highlightQuery = if (searchActive && searchQuery.isNotBlank()) searchQuery else null
+
+    LaunchedEffect(searchActive) {
+        if (searchActive) searchFocusRequester.requestFocus()
+    }
+
+    LaunchedEffect(screen.messages.lastOrNull()?.id, searchActive) {
+        if (!searchActive && screen.messages.isNotEmpty()) {
+            listState.scrollToItem(screen.messages.lastIndex)
+        }
+    }
+
+    LaunchedEffect(searchActive, searchQuery, matchingIds) {
+        if (searchActive && searchQuery.isNotBlank() && matchingIds.isNotEmpty()) {
+            val index = visibleMessages.indexOfFirst { it.id == matchingIds.first() }
+            if (index >= 0) listState.scrollToItem(index)
+        }
+    }
+
     Column(Modifier.fillMaxSize()) {
-        if (searchActive) OutlinedTextField(value = searchQuery, onValueChange = onSearchQueryChange, modifier = Modifier.fillMaxWidth().padding(8.dp), placeholder = { Text("Search in conversation") }, singleLine = true)
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Column { Text(screen.header.title, style = MaterialTheme.typography.titleMedium); screen.header.subtitle?.let { Text(it, style = MaterialTheme.typography.labelSmall) } }
+        if (searchActive) {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = onSearchQueryChange,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(8.dp)
+                    .focusRequester(searchFocusRequester),
+                placeholder = { Text("Search in conversation") },
+                singleLine = true,
+            )
+        }
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ContactAvatar(displayName = screen.header.title, photoUri = screen.header.photoUri)
+            Column {
+                Text(screen.header.title, style = MaterialTheme.typography.titleMedium)
+                screen.header.subtitle?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
+            }
         }
         LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(visibleMessages, key = { it.id }) { row -> ConversationBubbleRow(row = row, onRetry = { onRetry(row.id) }) }
+            items(visibleMessages, key = { it.id }) { row ->
+                ConversationBubbleRow(
+                    row = row,
+                    highlight = if (row.id in matchingIds) highlightQuery else null,
+                    onRetry = { onRetry(row.id) },
+                )
+            }
         }
         MessageComposerPanel(body = screen.composer.body, sims = sims, selectedSubscriptionId = screen.composer.selectedSubscriptionId, sending = screen.composer.sending, error = screen.composer.error?.name, onBodyChange = onBodyChange, onSimSelected = onSimSelected, onSend = onSend)
     }
 }
 
 @Composable
-private fun ConversationBubbleRow(row: ConversationMessageRow, onRetry: () -> Unit) {
+private fun ConversationBubbleRow(row: ConversationMessageRow, highlight: String?, onRetry: () -> Unit) {
     val alignment = if (row.layout.alignment == BubbleAlignment.End) Arrangement.End else Arrangement.Start
     Row(Modifier.fillMaxWidth(), horizontalArrangement = alignment) {
         if (row.layout.showBubble) {
             ElevatedCard(colors = CardDefaults.elevatedCardColors(containerColor = if (row.layout.alignment == BubbleAlignment.End) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant)) {
-                MessageBubbleContent(row, onRetry, false)
+                MessageBubbleContent(row, highlight, onRetry, false)
             }
-        } else MessageBubbleContent(row, onRetry, true)
+        } else MessageBubbleContent(row, highlight, onRetry, true)
     }
 }
 
 @Composable
-private fun MessageBubbleContent(row: ConversationMessageRow, onRetry: () -> Unit, emojiStyle: Boolean) {
+private fun MessageBubbleContent(row: ConversationMessageRow, highlight: String?, onRetry: () -> Unit, emojiStyle: Boolean) {
+    val clipboard = LocalClipboardManager.current
     Column(Modifier.padding(12.dp).widthIn(max = 300.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(row.body, fontSize = if (emojiStyle) 28.sp else MaterialTheme.typography.bodyLarge.fontSize, textAlign = if (emojiStyle) TextAlign.Center else TextAlign.Start)
-        Text(row.status.statusLabel, style = MaterialTheme.typography.labelSmall)
-        if (row.status.showRetry) TextButton(onClick = onRetry, contentPadding = PaddingValues(0.dp)) { Text(row.status.retryLabel) }
+        if (emojiStyle) {
+            Text(row.body, fontSize = 28.sp, textAlign = TextAlign.Center)
+        } else {
+            HighlightedMessageText(text = row.body, highlight = highlight)
+        }
+        Text(row.timeLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        row.copyableCode?.let { code ->
+            TextButton(
+                onClick = { clipboard.setText(AnnotatedString(code)) },
+                contentPadding = PaddingValues(0.dp),
+            ) { Text("کپی کد") }
+        }
+        if (row.showRetry) TextButton(onClick = onRetry, contentPadding = PaddingValues(0.dp)) { Text("Retry") }
     }
 }
 
@@ -703,9 +942,73 @@ private fun HelpScreen() {
 }
 
 @Composable
-private fun ContactsPlaceholderScreen() {
-    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Text("Contacts are loaded from your device when the READ_CONTACTS permission is granted.\nStart a conversation from an existing SMS thread.")
+private fun ContactsScreen(
+    contacts: List<DeviceContact>,
+    loading: Boolean,
+    hasPermission: Boolean,
+    searchQuery: String,
+    onSearchChange: (String) -> Unit,
+    onRequestPermission: () -> Unit,
+    onContactClick: (DeviceContact) -> Unit,
+) {
+    when {
+        !hasPermission -> {
+            Column(
+                Modifier.fillMaxSize().padding(24.dp),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text("Contacts permission is required to show your address book.")
+                Spacer(Modifier.height(16.dp))
+                Button(onClick = onRequestPermission) { Text("Grant contacts access") }
+            }
+        }
+        loading && contacts.isEmpty() -> {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+        }
+        contacts.isEmpty() -> {
+            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text("No contacts with phone numbers found.")
+            }
+        }
+        else -> {
+            Column(Modifier.fillMaxSize()) {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = onSearchChange,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    placeholder = { Text("Search contacts") },
+                    singleLine = true,
+                    leadingIcon = { Icon(Icons.Default.Search, null) },
+                )
+                if (contacts.isEmpty()) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("No contacts match your search")
+                    }
+                } else {
+                    LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
+                        items(contacts, key = { "${it.id}:${it.phoneNumber}" }) { contact ->
+                            ListItem(
+                                headlineContent = { Text(contact.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                supportingContent = { Text(contact.phoneNumber) },
+                                leadingContent = {
+                                    ContactAvatar(
+                                        displayName = contact.displayName,
+                                        photoUri = contact.photoUri,
+                                    )
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onContactClick(contact) },
+                            )
+                            HorizontalDivider()
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -734,4 +1037,4 @@ private fun requiredPermissions(): Array<String> = buildList {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
 }.toTypedArray()
 
-private fun formatMessageTime(instant: java.time.Instant): String = DateTimeFormatter.ofPattern("MMM d, HH:mm").withZone(ZoneId.systemDefault()).format(instant)
+private fun formatMessageTime(instant: Instant): String = JalaliDateFormatter.format(instant)

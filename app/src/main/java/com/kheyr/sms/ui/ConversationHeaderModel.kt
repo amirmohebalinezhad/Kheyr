@@ -1,5 +1,6 @@
 package com.kheyr.sms.ui
 
+import android.net.Uri
 import com.kheyr.sms.telephony.SimBadgeResolver
 import com.kheyr.sms.telephony.SimCard
 
@@ -10,6 +11,7 @@ class ConversationHeaderMapper {
         callEnabled = input.address.any(Char::isDigit),
         infoEnabled = true,
         searchEnabled = input.messageCount > 0,
+        photoUri = input.photoUri,
     )
 }
 
@@ -18,6 +20,7 @@ data class ConversationHeaderInput(
     val displayName: String,
     val subscriptionId: Int?,
     val messageCount: Int,
+    val photoUri: Uri? = null,
 )
 
 data class ConversationHeader(
@@ -26,4 +29,5 @@ data class ConversationHeader(
     val callEnabled: Boolean,
     val infoEnabled: Boolean,
     val searchEnabled: Boolean,
+    val photoUri: Uri? = null,
 )

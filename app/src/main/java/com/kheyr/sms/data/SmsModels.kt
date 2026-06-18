@@ -1,5 +1,6 @@
 package com.kheyr.sms.data
 
+import android.net.Uri
 import java.time.Instant
 
 data class SmsThread(
@@ -15,6 +16,7 @@ data class SmsThread(
     val isSpam: Boolean = false,
     val isArchived: Boolean = false,
     val simSlot: Int? = null,
+    val contactPhotoUri: Uri? = null,
 )
 
 data class SmsMessage(
@@ -26,6 +28,7 @@ data class SmsMessage(
     val direction: MessageDirection,
     val status: MessageStatus,
     val simSlot: Int? = null,
+    val telephonyId: Long? = null,
     val isSpam: Boolean = false,
 )
 

@@ -93,23 +93,69 @@ interface SmsDao {
     @Query("SELECT * FROM messages WHERE status = 'Failed' ORDER BY timestamp ASC, id ASC")
     fun failedOutgoingMessages(): List<SmsMessageEntity>
 
+    @Transaction
+    fun ensureThreadState(threadId: Long) {
+        insertThreadState(ThreadStateEntity(threadId))
+    }
+
+    @Transaction
+    fun markThreadRead(threadId: Long) {
+        ensureThreadState(threadId)
+        markThreadReadMessages(threadId)
+    }
+
     @Query("UPDATE messages SET read = 1 WHERE threadId = :threadId AND direction = 'Incoming'")
-    fun markThreadRead(threadId: Long)
+    fun markThreadReadMessages(threadId: Long)
+
+    @Transaction
+    fun updatePinned(threadId: Long, isPinned: Boolean, pinnedAt: Instant?) {
+        ensureThreadState(threadId)
+        updatePinnedState(threadId, isPinned, pinnedAt)
+    }
 
     @Query("UPDATE thread_state SET isPinned = :isPinned, pinnedAt = :pinnedAt WHERE threadId = :threadId")
-    fun updatePinned(threadId: Long, isPinned: Boolean, pinnedAt: Instant?)
+    fun updatePinnedState(threadId: Long, isPinned: Boolean, pinnedAt: Instant?)
+
+    @Transaction
+    fun updateArchived(threadId: Long, isArchived: Boolean) {
+        ensureThreadState(threadId)
+        updateArchivedState(threadId, isArchived)
+    }
 
     @Query("UPDATE thread_state SET isArchived = :isArchived WHERE threadId = :threadId")
-    fun updateArchived(threadId: Long, isArchived: Boolean)
+    fun updateArchivedState(threadId: Long, isArchived: Boolean)
+
+    @Transaction
+    fun updateSpam(threadId: Long, isSpam: Boolean) {
+        ensureThreadState(threadId)
+        updateSpamState(threadId, isSpam)
+    }
 
     @Query("UPDATE thread_state SET isSpam = :isSpam WHERE threadId = :threadId")
-    fun updateSpam(threadId: Long, isSpam: Boolean)
+    fun updateSpamState(threadId: Long, isSpam: Boolean)
+
+    @Transaction
+    fun updateMuted(threadId: Long, isMuted: Boolean) {
+        ensureThreadState(threadId)
+        updateMutedState(threadId, isMuted)
+    }
 
     @Query("UPDATE thread_state SET isMuted = :isMuted WHERE threadId = :threadId")
-    fun updateMuted(threadId: Long, isMuted: Boolean)
+    fun updateMutedState(threadId: Long, isMuted: Boolean)
 
     @Query("UPDATE messages SET status = :status WHERE id = :messageId")
     fun updateSendStatus(messageId: Long, status: MessageStatus)
+
+    @Query("UPDATE messages SET status = :status WHERE telephonyId = :telephonyId")
+    fun updateSendStatusByTelephonyId(telephonyId: Long, status: MessageStatus)
+
+    @Query("""
+        SELECT telephonyId FROM messages
+        WHERE telephonyId IS NOT NULL AND direction = 'Outgoing' AND status != 'Delivered'
+        ORDER BY timestamp DESC
+        LIMIT :limit
+    """)
+    fun recentOutgoingTelephonyIds(limit: Int): List<Long>
 
     @Query("SELECT * FROM messages WHERE telephonyId = :telephonyId LIMIT 1")
     fun messageByTelephonyId(telephonyId: Long): SmsMessageEntity?
@@ -188,6 +234,14 @@ interface SmsDao {
 
     @Query("SELECT COALESCE(s.isSpam, 0) FROM thread_state s WHERE s.threadId = :threadId")
     fun isThreadSpam(threadId: Long): Boolean?
+
+    @Query("""
+        SELECT threadId FROM messages
+        WHERE address = :address AND body = :body AND direction = 'Outgoing'
+        AND timestamp >= :since
+        ORDER BY timestamp DESC LIMIT 1
+    """)
+    fun recentOutgoingThreadId(address: String, body: String, since: Instant): Long?
 
     @Query("SELECT * FROM sync_spam_metadata WHERE threadId = :threadId")
     fun syncSpamMetadata(threadId: Long): SyncSpamMetadataEntity?
