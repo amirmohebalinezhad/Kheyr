@@ -197,6 +197,11 @@ interface SmsDao {
             } else {
                 message.direction
             }
+            val status = if (direction == MessageDirection.Outgoing) {
+                preferOutgoingSendStatus(existing.status, message.status)
+            } else {
+                message.status
+            }
             updateTelephonyMessage(
                 telephonyId = telephonyId,
                 threadId = message.threadId,
@@ -204,7 +209,7 @@ interface SmsDao {
                 body = message.body,
                 timestamp = message.timestamp,
                 direction = direction,
-                status = message.status,
+                status = status,
                 read = message.read,
                 simSlot = message.simSlot,
             )
@@ -253,4 +258,14 @@ interface SmsDao {
 
     @Query("SELECT * FROM sync_spam_metadata WHERE threadId = :threadId")
     fun syncSpamMetadata(threadId: Long): SyncSpamMetadataEntity?
+}
+
+private fun preferOutgoingSendStatus(local: MessageStatus, synced: MessageStatus): MessageStatus {
+    if (local == MessageStatus.Sent || local == MessageStatus.Delivered) {
+        return when (synced) {
+            MessageStatus.Failed, MessageStatus.Sending -> local
+            else -> synced
+        }
+    }
+    return synced
 }

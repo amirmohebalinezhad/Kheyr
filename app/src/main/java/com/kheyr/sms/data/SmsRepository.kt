@@ -144,15 +144,15 @@ class SmsRepository(
             val read = cursor.getColumnIndexOrThrow(Telephony.Sms.READ)
             val subId = cursor.getColumnIndex(SUBSCRIPTION_ID)
             val type = cursor.getColumnIndexOrThrow(Telephony.Sms.TYPE)
+            val statusColumn = cursor.getColumnIndexOrThrow(Telephony.Sms.STATUS)
             val messages = mutableListOf<SmsMessageEntity>()
             while (cursor.moveToNext()) {
                 val messageType = cursor.getInt(type)
                 val direction = TelephonyDirectionMapper.directionFromType(messageType)
-                val status = when (messageType) {
-                    Telephony.Sms.MESSAGE_TYPE_SENT -> MessageStatus.Sent
-                    Telephony.Sms.MESSAGE_TYPE_FAILED -> MessageStatus.Failed
-                    Telephony.Sms.MESSAGE_TYPE_OUTBOX -> MessageStatus.Sending
-                    else -> MessageStatus.Received
+                val status = if (direction == MessageDirection.Outgoing) {
+                    messageStatus(messageType, cursor.getInt(statusColumn))
+                } else {
+                    MessageStatus.Received
                 }
                 messages += SmsMessageEntity(
                     telephonyId = cursor.getLong(id),

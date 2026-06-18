@@ -48,6 +48,10 @@ class ConversationScreenMapper(
         layout = ConversationBubbleLayoutResolver.resolve(message.direction, message.body),
         timeLabel = JalaliDateFormatter.format(message.timestamp),
         showRetry = message.direction == MessageDirection.Outgoing && message.status == MessageStatus.Failed,
-        copyableCode = OtpDetector.findCopyableCode(message.body),
+        copyableCode = if (message.direction == MessageDirection.Incoming) {
+            OtpDetector.findCopyableCode(message.body)
+        } else {
+            null
+        },
     )
 }

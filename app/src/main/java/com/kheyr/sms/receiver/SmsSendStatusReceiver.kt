@@ -13,13 +13,14 @@ class SmsSendStatusReceiver : BroadcastReceiver() {
         val messageId = intent.getLongExtra(SmsSender.EXTRA_MESSAGE_ID, -1L).takeIf { it > 0L } ?: return
         val partIndex = intent.getIntExtra(SmsSender.EXTRA_PART_INDEX, 0)
         val partCount = intent.getIntExtra(SmsSender.EXTRA_PART_COUNT, 1).coerceAtLeast(1)
+        val callbackResult = resultCode
         val pendingResult = goAsync()
         Thread {
             try {
                 val repository = SmsRepository(context)
                 when (intent.action) {
                     SmsSender.ACTION_SMS_SENT -> {
-                        if (resultCode == Activity.RESULT_OK) {
+                        if (SmsSendStatusDecider.sentSucceeded(callbackResult)) {
                             if (recordSuccessfulPart(context, "sent", messageId, partIndex, partCount)) {
                                 repository.markSent(messageId)
                                 repository.notifyRefreshForTelephonyId(messageId)
@@ -32,7 +33,7 @@ class SmsSendStatusReceiver : BroadcastReceiver() {
                         }
                     }
                     SmsSender.ACTION_SMS_DELIVERED -> {
-                        if (resultCode == Activity.RESULT_OK && recordSuccessfulPart(context, "delivered", messageId, partIndex, partCount)) {
+                        if (SmsSendStatusDecider.sentSucceeded(callbackResult) && recordSuccessfulPart(context, "delivered", messageId, partIndex, partCount)) {
                             repository.markDelivered(messageId)
                             repository.notifyRefreshForTelephonyId(messageId)
                         }
@@ -77,4 +78,8 @@ class SmsSendStatusReceiver : BroadcastReceiver() {
     companion object {
         private const val PREFS_NAME = "sms_send_status_parts"
     }
+}
+
+internal object SmsSendStatusDecider {
+    fun sentSucceeded(resultCode: Int): Boolean = resultCode == Activity.RESULT_OK
 }
