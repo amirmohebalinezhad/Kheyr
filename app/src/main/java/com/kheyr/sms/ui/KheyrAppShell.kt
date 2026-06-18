@@ -33,6 +33,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import com.kheyr.sms.util.MessageCopyableSegmentDetector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -800,11 +801,35 @@ private fun ConversationBubbleRow(row: ConversationMessageRow, highlight: String
 @Composable
 private fun MessageBubbleContent(row: ConversationMessageRow, highlight: String?, onRetry: () -> Unit, emojiStyle: Boolean) {
     val clipboard = LocalClipboardManager.current
+    var showCopyMenu by remember { mutableStateOf(false) }
+    val copyableSegments = remember(row.body) { MessageCopyableSegmentDetector.findAll(row.body) }
+    val textModifier = Modifier.combinedClickable(onClick = {}, onLongClick = { showCopyMenu = true })
+
+    if (showCopyMenu) {
+        MessageCopyMenuDialog(
+            body = row.body,
+            segments = copyableSegments,
+            onDismiss = { showCopyMenu = false },
+            onCopy = { text ->
+                clipboard.setText(AnnotatedString(text))
+                showCopyMenu = false
+            },
+        )
+    }
+
     Column(Modifier.padding(12.dp).widthIn(max = 300.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         if (emojiStyle) {
-            Text(row.body, fontSize = 28.sp, textAlign = TextAlign.Center)
+            Text(
+                row.body,
+                modifier = textModifier,
+                fontSize = 28.sp,
+                textAlign = TextAlign.Center,
+                style = MaterialTheme.typography.bodyLarge.copy(
+                    textDirection = MessageTextDirection.resolve(row.body),
+                ),
+            )
         } else {
-            HighlightedMessageText(text = row.body, highlight = highlight)
+            HighlightedMessageText(text = row.body, highlight = highlight, modifier = textModifier)
         }
         Text(row.timeLabel, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         row.copyableCode?.let { code ->
