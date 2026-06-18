@@ -138,6 +138,8 @@ class PolicyAwareIncomingSmsNotifier(
         decision as com.kheyr.sms.settings.NotificationPolicyDecision.Post
         ensureChannel()
         val intent = Intent(context, MainActivity::class.java)
+            .putExtra(MainActivity.EXTRA_THREAD_ID, message.threadId)
+            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         val notificationId = stableNotificationId(message.threadId)
         val pendingIntent = PendingIntent.getActivity(
             context,

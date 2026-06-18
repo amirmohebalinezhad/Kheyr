@@ -53,6 +53,10 @@ class PolicyAwareIncomingSmsNotifierTest {
         // Full text shown when expanded.
         assertEquals("Your verification code is 123456", notification.extras.getCharSequence(Notification.EXTRA_BIG_TEXT).toString())
 
+        // Tapping the notification deep-links into the originating thread.
+        val contentIntent = shadowOf(notification.contentIntent).savedIntent
+        assertEquals(1L, contentIntent.getLongExtra(com.kheyr.sms.MainActivity.EXTRA_THREAD_ID, -1L))
+
         // OTP message: Copy code (primary) + Reply + Mark as read.
         assertEquals(listOf("Copy code", "Reply", "Mark as read"), notification.actions.map { it.title.toString() })
 
