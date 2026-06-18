@@ -1013,7 +1013,11 @@ private fun ThreadFolderScreen(
     onThreadLongPress: (SmsThread) -> Unit,
     emptyText: String,
 ) {
+    val topInset = KheyrChromeInsets.shellTop()
+    val bottomInset = KheyrChromeInsets.bottomNav()
+
     Column(Modifier.fillMaxSize()) {
+        Spacer(Modifier.height(topInset))
         KheyrSearchField(
             value = searchQuery,
             onValueChange = onSearchChange,
@@ -1037,13 +1041,16 @@ private fun ThreadFolderScreen(
             }
         }
         if (loading && threads.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
         } else if (threads.isEmpty()) {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text(emptyText) }
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { Text(emptyText) }
         } else {
-            LazyColumn(contentPadding = PaddingValues(bottom = 88.dp)) {
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(bottom = bottomInset),
+            ) {
                 items(threads, key = { it.id }) { thread ->
                     val row = mapper.map(thread, folder, sims)
                     TelegramStyleThreadRow(
@@ -1083,6 +1090,7 @@ private fun ConversationScreenContent(
     val searchFocusRequester = remember { FocusRequester() }
     val visibleMessages = if (searchActive && searchQuery.isNotBlank()) screen.messages.filter { it.id in matchingIds } else screen.messages
     val highlightQuery = if (searchActive && searchQuery.isNotBlank()) searchQuery else null
+    val topInset = KheyrChromeInsets.shellTop()
 
     LaunchedEffect(searchActive) {
         if (searchActive) searchFocusRequester.requestFocus()
@@ -1101,38 +1109,36 @@ private fun ConversationScreenContent(
         }
     }
 
-    Box(Modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize()) {
-            if (searchActive) {
-                KheyrSearchField(
-                    value = searchQuery,
-                    onValueChange = onSearchQueryChange,
-                    placeholder = "Search in conversation",
-                    modifier = Modifier
-                        .padding(top = 72.dp, start = 8.dp, end = 8.dp, bottom = 8.dp)
-                        .focusRequester(searchFocusRequester),
-                    focusRequester = searchFocusRequester,
+    Column(Modifier.fillMaxSize()) {
+        if (searchActive) {
+            KheyrSearchField(
+                value = searchQuery,
+                onValueChange = onSearchQueryChange,
+                placeholder = "Search in conversation",
+                modifier = Modifier
+                    .padding(top = topInset, start = 8.dp, end = 8.dp, bottom = 8.dp)
+                    .focusRequester(searchFocusRequester),
+                focusRequester = searchFocusRequester,
+            )
+        }
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.weight(1f),
+            contentPadding = PaddingValues(
+                start = 12.dp,
+                end = 12.dp,
+                top = if (searchActive) 8.dp else topInset,
+                bottom = 8.dp,
+            ),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            items(visibleMessages, key = { it.id }) { row ->
+                ConversationBubbleRow(
+                    row = row,
+                    darkTheme = darkTheme,
+                    highlight = if (row.id in matchingIds) highlightQuery else null,
+                    onRetry = { onRetry(row.id) },
                 )
-            }
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(
-                    start = 12.dp,
-                    end = 12.dp,
-                    top = if (searchActive) 8.dp else 72.dp,
-                    bottom = 96.dp,
-                ),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                items(visibleMessages, key = { it.id }) { row ->
-                    ConversationBubbleRow(
-                        row = row,
-                        darkTheme = darkTheme,
-                        highlight = if (row.id in matchingIds) highlightQuery else null,
-                        onRetry = { onRetry(row.id) },
-                    )
-                }
             }
         }
         TelegramStyleComposer(
@@ -1145,7 +1151,6 @@ private fun ConversationScreenContent(
             onSimSelected = onSimSelected,
             onSend = onSend,
             modifier = Modifier
-                .align(Alignment.BottomCenter)
                 .fillMaxWidth()
                 .navigationBarsPadding(),
         )
@@ -1193,6 +1198,8 @@ private fun ConversationTopBar(
 
 @Composable
 private fun SettingsListScreen(onCategoryClick: (SettingsCategory) -> Unit) {
+    val topInset = KheyrChromeInsets.shellTop()
+    val bottomInset = KheyrChromeInsets.bottomNav()
     val grouped = SettingsCategoryOrder.ordered.groupBy { category ->
         when (category) {
             SettingsCategory.Notifications, SettingsCategory.UnknownSenders -> "Notifications"
@@ -1204,7 +1211,7 @@ private fun SettingsListScreen(onCategoryClick: (SettingsCategory) -> Unit) {
         }
     }
     LazyColumn(
-        contentPadding = PaddingValues(top = 72.dp, bottom = 88.dp),
+        contentPadding = PaddingValues(top = topInset, bottom = bottomInset),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
         grouped.forEach { (sectionTitle, categories) ->
@@ -1254,7 +1261,8 @@ private fun SettingsDetailScreen(
     onDeleteCloudData: () -> Unit,
     onExportCloudData: () -> Unit,
 ) {
-    Column(Modifier.fillMaxSize().padding(top = 72.dp, start = 16.dp, end = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    val topInset = KheyrChromeInsets.shellTop()
+    Column(Modifier.fillMaxSize().padding(top = topInset, start = 16.dp, end = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         when (category) {
             SettingsCategory.Notifications -> {
                 NotificationContentMode.entries.forEach { mode ->
@@ -1306,7 +1314,8 @@ private fun SettingsDetailScreen(
 
 @Composable
 private fun DesktopSyncScreen(apiBaseUrl: String, onRevoke: () -> Unit) {
-    Column(Modifier.fillMaxSize().padding(top = 72.dp, start = 24.dp, end = 24.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    val topInset = KheyrChromeInsets.shellTop()
+    Column(Modifier.fillMaxSize().padding(top = topInset, start = 24.dp, end = 24.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Pair your desktop app by scanning a QR code shown on the desktop client.", style = MaterialTheme.typography.bodyLarge)
         Text("Backend URL: $apiBaseUrl", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
         Text("Replace YOUR-BASE-URL in app/build.gradle with your server address.", style = MaterialTheme.typography.bodySmall)
@@ -1316,8 +1325,9 @@ private fun DesktopSyncScreen(apiBaseUrl: String, onRevoke: () -> Unit) {
 
 @Composable
 private fun HelpScreen() {
+    val topInset = KheyrChromeInsets.shellTop()
     val help = HelpFeedbackModel(helpUrl = "https://kheyr.app/help", supportEmail = "support@kheyr.app")
-    Column(Modifier.padding(top = 72.dp, start = 24.dp, end = 24.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Column(Modifier.padding(top = topInset, start = 24.dp, end = 24.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Help & Feedback"); Text("Email: ${help.supportEmail}"); Text("Help center: ${help.helpUrl}")
     }
 }
@@ -1332,6 +1342,8 @@ private fun ContactsScreen(
     onRequestPermission: () -> Unit,
     onContactClick: (DeviceContact) -> Unit,
 ) {
+    val topInset = KheyrChromeInsets.shellTop()
+    val bottomInset = KheyrChromeInsets.bottomNav()
     val filteredContacts = remember(contacts, searchQuery) {
         val query = searchQuery.trim()
         if (query.isBlank()) {
@@ -1347,7 +1359,7 @@ private fun ContactsScreen(
     when {
         !hasPermission -> {
             Column(
-                Modifier.fillMaxSize().padding(24.dp),
+                Modifier.fillMaxSize().padding(top = topInset, start = 24.dp, end = 24.dp, bottom = 24.dp),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
@@ -1357,17 +1369,18 @@ private fun ContactsScreen(
             }
         }
         loading && contacts.isEmpty() -> {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize().padding(top = topInset), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
         }
         contacts.isEmpty() -> {
-            Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Box(Modifier.fillMaxSize().padding(top = topInset), contentAlignment = Alignment.Center) {
                 Text("No contacts with phone numbers found.")
             }
         }
         else -> {
             Column(Modifier.fillMaxSize()) {
+                Spacer(Modifier.height(topInset))
                 KheyrSearchField(
                     value = searchQuery,
                     onValueChange = onSearchChange,
@@ -1375,11 +1388,14 @@ private fun ContactsScreen(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 )
                 if (filteredContacts.isEmpty()) {
-                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
                         Text("No contacts match your search")
                     }
                 } else {
-                    LazyColumn(contentPadding = PaddingValues(top = 72.dp, bottom = 88.dp)) {
+                    LazyColumn(
+                        modifier = Modifier.weight(1f),
+                        contentPadding = PaddingValues(bottom = bottomInset),
+                    ) {
                         items(filteredContacts, key = { "${it.id}:${it.phoneNumber}" }) { contact ->
                             TelegramStyleContactRow(
                                 displayName = contact.displayName,
