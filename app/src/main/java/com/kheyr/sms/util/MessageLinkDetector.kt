@@ -8,8 +8,8 @@ data class MessageLink(
 
 object MessageLinkDetector {
     private val urlPattern = Regex("""(?i)(https?://[^\s<>"']+|www\.[^\s<>"']+)""")
-    // e.g. example.com/path — host chars before / are [a-z0-9.\-], TLD is 2–6 letters
-    private val barePathPattern = Regex("""(?i)([a-z0-9][a-z0-9.\-]*\.[a-z]{2,6}/[^\s<>"']+)""")
+    // example.com, api.example.com, site.my-site.io, with optional /path
+    private val bareDomainPattern = Regex("""(?i)([a-z0-9][a-z0-9.\-]*\.[a-z]{2,6})(?:/[^\s<>"']+)?""")
     private val trailingPunctuation = Regex("""[.,;:!?)}\]"']+$""")
 
     fun findAll(text: String): List<MessageLink> {
@@ -17,12 +17,23 @@ object MessageLinkDetector {
         urlPattern.findAll(text).forEach { match ->
             toLink(match.value, match.range.first)?.let { links += it }
         }
-        barePathPattern.findAll(text).forEach { match ->
-            if (links.none { overlaps(it, match.range.first, match.range.last + 1) }) {
+        bareDomainPattern.findAll(text).forEach { match ->
+            if (canMatchBareDomain(text, match.range.first) &&
+                links.none { overlaps(it, match.range.first, match.range.last + 1) }
+            ) {
                 toLink(match.value, match.range.first, prefixHttps = true)?.let { links += it }
             }
         }
         return links.sortedBy { it.start }
+    }
+
+    private fun canMatchBareDomain(text: String, start: Int): Boolean {
+        if (start > 0) {
+            when (text[start - 1]) {
+                '@', '/' -> return false
+            }
+        }
+        return true
     }
 
     private fun toLink(raw: String, start: Int, prefixHttps: Boolean = false): MessageLink? {
