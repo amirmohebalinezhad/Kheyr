@@ -26,11 +26,14 @@ fun ProfileScreen(
     modifier: Modifier = Modifier,
 ) {
     val help = HelpFeedbackModel(helpUrl = "https://kheyr.app/help", supportEmail = "support@kheyr.app")
+    val topInset = KheyrChromeInsets.shellTop()
+    val bottomInset = KheyrChromeInsets.bottomNav()
 
     Column(
         modifier = modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
+            .padding(top = topInset, bottom = bottomInset)
             .padding(vertical = 16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
