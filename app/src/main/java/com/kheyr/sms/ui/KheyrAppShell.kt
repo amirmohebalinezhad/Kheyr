@@ -79,7 +79,7 @@ enum class AppScreen { Onboarding, Threads, Conversation, Settings, SettingsDeta
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun KheyrAppShell() {
+fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {}) {
     val context = LocalContext.current
     val app = context.applicationContext as KheyrApplication
     val preferences = app.preferences
@@ -314,6 +314,22 @@ fun KheyrAppShell() {
                 selectedSubscriptionId = preferences.defaultSubscriptionId ?: sims.firstOrNull()?.subscriptionId,
             )
         }
+    }
+
+    // Opening a notification deep-links straight into its conversation.
+    LaunchedEffect(openThreadId) {
+        val id = openThreadId ?: return@LaunchedEffect
+        if (!smsPermissionGranted || !preferences.onboardingComplete) {
+            onThreadConsumed()
+            return@LaunchedEffect
+        }
+        val target = repository.loadLocalThreads().firstOrNull { it.id == id }
+            ?: repository.loadSpamThreads().firstOrNull { it.id == id }
+            ?: repository.loadArchivedThreads().firstOrNull { it.id == id }
+        if (target != null) {
+            openConversation(contactRepository.enrichThreads(listOf(target)).firstOrNull() ?: target)
+        }
+        onThreadConsumed()
     }
 
     MaterialTheme(colorScheme = colorScheme, typography = KheyrTypography.typography) {

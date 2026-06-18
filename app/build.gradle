@@ -27,6 +27,12 @@ android {
         buildConfig true
     }
 
+    testOptions {
+        unitTests {
+            includeAndroidResources = true
+        }
+    }
+
     defaultConfig {
         applicationId 'com.kheyr.sms'
         minSdk 26
