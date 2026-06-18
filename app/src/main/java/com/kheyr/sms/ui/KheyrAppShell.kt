@@ -11,6 +11,11 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -39,6 +44,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.kheyr.sms.KheyrApplication
+import com.kheyr.sms.R
 import com.kheyr.sms.api.ApiConfig
 import com.kheyr.sms.api.KheyrApiService
 import com.kheyr.sms.conversation.ConversationSearchMatcher
@@ -46,6 +52,7 @@ import com.kheyr.sms.contacts.ContactRepository
 import com.kheyr.sms.contacts.DeviceContact
 import com.kheyr.sms.conversation.SearchableMessage
 import com.kheyr.sms.data.SmsMessage
+import com.kheyr.sms.data.SmsRefreshEvents
 import com.kheyr.sms.data.SmsRepository
 import com.kheyr.sms.data.SmsThread
 import com.kheyr.sms.domain.ThreadSorter
@@ -76,6 +83,11 @@ import com.kheyr.sms.util.JalaliDateFormatter
 import java.time.Instant
 
 enum class AppScreen { Onboarding, Threads, Conversation, Settings, SettingsDetail, DesktopSync, Help, Contacts }
+
+private sealed interface InboxPane {
+    data object List : InboxPane
+    data class Chat(val threadId: Long) : InboxPane
+}
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -123,6 +135,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
         mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED)
     }
     var sims by remember { mutableStateOf<List<SimCard>>(emptyList()) }
+    var resumeNonce by remember { mutableIntStateOf(0) }
     val activity = context as? ComponentActivity
     DisposableEffect(activity) {
         val lifecycle = activity?.lifecycle ?: return@DisposableEffect onDispose {}
@@ -133,6 +146,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                 contactsPermissionGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
                 if (smsPermissionGranted) {
                     sims = simRepository.activeSims()
+                    resumeNonce++
                 }
             }
         }
@@ -146,12 +160,16 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
     var otpPhone by remember { mutableStateOf("") }
     var otpCode by remember { mutableStateOf("") }
     var statusMessage by remember { mutableStateOf<String?>(null) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    var inboxNavForward by remember { mutableStateOf(true) }
+    var pendingDeleteThreadId by remember { mutableStateOf<Long?>(null) }
 
     val systemDark = isSystemInDarkTheme()
     val darkTheme = ThemePreferenceResolver.isDark(themePreference, systemDark)
     val colorScheme = if (darkTheme) darkColorScheme(primary = androidx.compose.ui.graphics.Color(0xFF0F8B8D)) else lightColorScheme(primary = androidx.compose.ui.graphics.Color(0xFF0F8B8D))
 
     fun openConversation(thread: SmsThread) {
+        inboxNavForward = true
         selectedThread = thread
         messages = emptyList()
         conversationSearchActive = false
@@ -186,6 +204,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
     fun navigateBack() {
         when {
             screen == AppScreen.Conversation -> {
+                inboxNavForward = false
                 scope.launch {
                     selectedThread?.id?.let { repository.markThreadRead(it) }
                     selectedThread = null
@@ -251,6 +270,38 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
         }
     }
 
+    suspend fun commitPendingDelete() {
+        val threadId = pendingDeleteThreadId ?: return
+        pendingDeleteThreadId = null
+        repository.deleteThreadMessages(threadId)
+    }
+
+    fun deleteThreadWithUndo(thread: SmsThread) {
+        scope.launch {
+            commitPendingDelete()
+            val folder = drawerItem.toFolder()
+            val snapshot = repository.loadLocalMessageEntities(thread.id)
+            pendingDeleteThreadId = thread.id
+            threads = ThreadListOptimisticUpdate.applyAction(threads, thread, ThreadBulkAction.Delete)
+            threads = ThreadListOptimisticUpdate.filterForFolder(threads, folder)
+            if (selectedThread?.id == thread.id) {
+                navigateBack()
+            }
+            val result = snackbarHostState.showSnackbar(
+                message = context.getString(R.string.thread_deleted),
+                actionLabel = context.getString(R.string.undo),
+                duration = SnackbarDuration.Long,
+            )
+            if (result == SnackbarResult.ActionPerformed) {
+                pendingDeleteThreadId = null
+                repository.restoreThreadMessages(snapshot)
+                refreshThreadsLocal()
+            } else if (pendingDeleteThreadId == thread.id) {
+                commitPendingDelete()
+            }
+        }
+    }
+
     fun syncThreadsInBackground() {
         if (!smsPermissionGranted) return
         scope.launch {
@@ -299,6 +350,33 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
         if (screen == AppScreen.Threads) {
             refreshThreadsLocal()
             syncThreadsInBackground()
+        }
+    }
+
+    LaunchedEffect(resumeNonce) {
+        if (resumeNonce > 0 && screen == AppScreen.Threads) {
+            refreshThreadsLocal()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        SmsRefreshEvents.events.collect { event ->
+            when (event) {
+                SmsRefreshEvents.RefreshKind.Threads -> {
+                    if (screen == AppScreen.Threads) {
+                        refreshThreadsLocal()
+                    }
+                }
+                is SmsRefreshEvents.RefreshKind.ThreadMessages -> {
+                    if (screen == AppScreen.Threads) {
+                        refreshThreadsLocal()
+                    }
+                    if (selectedThread?.id == event.threadId) {
+                        messages = repository.loadLocalMessages(event.threadId)
+                        selectedThread = threads.filterOrFind(event.threadId) ?: selectedThread
+                    }
+                }
+            }
         }
     }
 
@@ -364,48 +442,29 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
             },
         ) {
             Scaffold(
+                snackbarHost = { SnackbarHost(snackbarHostState) },
                 topBar = {
-                    TopAppBar(
-                        title = {
-                            when {
-                                screen == AppScreen.Conversation -> {
-                                    val thread = selectedThread
-                                    if (thread != null) {
-                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            ContactAvatar(
-                                                displayName = thread.displayName.ifBlank { thread.address },
-                                                photoUri = thread.contactPhotoUri,
-                                                size = 32.dp,
-                                            )
-                                            Text(thread.displayName.ifBlank { thread.address })
-                                        }
-                                    }
+                    when (screen) {
+                        AppScreen.Conversation -> Unit
+                        else -> TopAppBar(
+                            title = {
+                                when (screen) {
+                                    AppScreen.Settings -> Text("Settings")
+                                    AppScreen.DesktopSync -> Text("Desktop Sync")
+                                    AppScreen.Help -> Text("Help & Feedback")
+                                    AppScreen.Contacts -> Text("Contacts")
+                                    else -> Text(drawerItem.title)
                                 }
-                                screen == AppScreen.Settings -> Text("Settings")
-                                screen == AppScreen.DesktopSync -> Text("Desktop Sync")
-                                screen == AppScreen.Help -> Text("Help & Feedback")
-                                screen == AppScreen.Contacts -> Text("Contacts")
-                                else -> Text(drawerItem.title)
-                            }
-                        },
-                        navigationIcon = {
-                            when {
-                                screen == AppScreen.Conversation -> IconButton(onClick = { navigateBack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
-                                screen == AppScreen.SettingsDetail -> IconButton(onClick = { screen = AppScreen.Settings }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
-                                screen in listOf(AppScreen.Settings, AppScreen.DesktopSync, AppScreen.Help, AppScreen.Contacts) -> IconButton(onClick = { navigateBack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
-                                screen == AppScreen.Threads && selectedThread == null -> IconButton(onClick = { drawerOpen = true }) { Icon(Icons.Default.Menu, "Menu") }
-                            }
-                        },
-                        actions = {
-                            if (screen == AppScreen.Conversation && selectedThread != null) {
-                                IconButton(onClick = { conversationSearchActive = !conversationSearchActive }) { Icon(Icons.Default.Search, "Search") }
-                                IconButton(onClick = {
-                                    val uri = Uri.parse("tel:${selectedThread!!.address}")
-                                    context.startActivity(Intent(Intent.ACTION_DIAL, uri))
-                                }) { Icon(Icons.Default.Call, "Call") }
-                            }
-                        },
-                    )
+                            },
+                            navigationIcon = {
+                                when {
+                                    screen == AppScreen.SettingsDetail -> IconButton(onClick = { screen = AppScreen.Settings }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+                                    screen in listOf(AppScreen.Settings, AppScreen.DesktopSync, AppScreen.Help, AppScreen.Contacts) -> IconButton(onClick = { navigateBack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+                                    screen == AppScreen.Threads && selectedThread == null -> IconButton(onClick = { drawerOpen = true }) { Icon(Icons.Default.Menu, "Menu") }
+                                }
+                            },
+                        )
+                    }
                 },
                 floatingActionButton = {
                     if (screen == AppScreen.Threads && selectedThread == null && drawerItem == DrawerItem.AllMessages) {
@@ -440,69 +499,100 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                             },
                             onFinish = { preferences.onboardingComplete = true; screen = AppScreen.Threads; refreshThreads() },
                         )
-                        AppScreen.Threads -> {
-                            if (selectedThread == null) {
-                                ThreadFolderScreen(
-                                    threads = threads.filter { thread ->
-                                        val searchable = SearchableThread(thread.displayName, thread.address, thread.lastMessage)
-                                        threadSearchMatcher.matches(searchable, searchQuery)
-                                    },
-                                    folder = drawerItem.toFolder(),
-                                    searchQuery = searchQuery,
-                                    onSearchChange = { searchQuery = it },
-                                    sims = sims,
-                                    mapper = threadRowMapper,
-                                    loading = threadsLoading,
-                                    onThreadClick = { openConversation(it) },
-                                    onThreadLongPress = { showThreadMenu = it },
-                                    emptyText = when {
-                                        threadsLoading -> "Loading conversations..."
-                                        !smsPermissionGranted -> "Grant SMS access to load conversations"
-                                        drawerItem == DrawerItem.Spam -> "No spam messages"
-                                        drawerItem == DrawerItem.Archived -> "No archived conversations"
-                                        drawerItem == DrawerItem.Pinned -> "No pinned conversations"
-                                        else -> "No conversations yet"
-                                    },
-                                )
+                        AppScreen.Threads, AppScreen.Conversation -> {
+                            val inboxPane: InboxPane = if (screen == AppScreen.Conversation && selectedThread != null) {
+                                InboxPane.Chat(selectedThread!!.id)
+                            } else {
+                                InboxPane.List
                             }
-                        }
-                        AppScreen.Conversation -> selectedThread?.let { thread ->
-                            val screenModel = screenMapper.map(thread, messages, sims, composerState)
-                            ConversationScreenContent(
-                                screen = screenModel,
-                                sims = sims,
-                                searchActive = conversationSearchActive,
-                                searchQuery = conversationSearchQuery,
-                                onSearchQueryChange = { conversationSearchQuery = it },
-                                matchingIds = conversationSearchMatcher.matchingIds(messages.map { SearchableMessage(it.id, it.body, it.address) }, conversationSearchQuery),
-                                onBodyChange = { composerState = composerReducer.reduce(composerState, SmsComposerEvent.BodyChanged(it)) },
-                                onSimSelected = { composerState = composerReducer.reduce(composerState, SmsComposerEvent.SubscriptionSelected(it)) },
-                                onSend = {
-                                    val state = composerReducer.reduce(composerState, SmsComposerEvent.SendRequested)
-                                    composerState = state
-                                    if (state.error != null) return@ConversationScreenContent
-                                    val text = state.body.trim()
-                                    scope.launch {
-                                        val telephonyId = repository.persistOutgoing(thread.address, text, state.selectedSubscriptionId)
-                                        repository.markSending(telephonyId)
-                                        repository.syncTelephonyMessagesByIds(listOf(telephonyId))
-                                        sender.send(SmsSendRequest(thread.address, text, state.selectedSubscriptionId, telephonyId))
-                                        composerState = composerReducer.reduce(state, SmsComposerEvent.SendCompleted)
-                                        messages = repository.loadLocalMessages(thread.id)
-                                        refreshThreadsLocal()
+                            AnimatedContent(
+                                targetState = inboxPane,
+                                transitionSpec = {
+                                    if (inboxNavForward) {
+                                        slideInHorizontally(animationSpec = tween(300)) { it } togetherWith
+                                            slideOutHorizontally(animationSpec = tween(300)) { -it / 3 }
+                                    } else {
+                                        slideInHorizontally(animationSpec = tween(300)) { -it / 3 } togetherWith
+                                            slideOutHorizontally(animationSpec = tween(300)) { it }
                                     }
                                 },
-                                onRetry = { messageId ->
-                                    val message = messages.firstOrNull { it.id == messageId } ?: return@ConversationScreenContent
-                                    val telephonyId = message.telephonyId ?: return@ConversationScreenContent
-                                    scope.launch {
-                                        repository.markSending(telephonyId)
-                                        sender.send(SmsSendRequest(message.address, message.body, message.simSlot, telephonyId))
-                                        repository.syncTelephonyMessagesByIds(listOf(telephonyId))
-                                        messages = repository.loadLocalMessages(thread.id)
+                                label = "inbox",
+                            ) { pane ->
+                                when (pane) {
+                                    InboxPane.List -> ThreadFolderScreen(
+                                        threads = threads.filter { thread ->
+                                            val searchable = SearchableThread(thread.displayName, thread.address, thread.lastMessage)
+                                            threadSearchMatcher.matches(searchable, searchQuery)
+                                        },
+                                        folder = drawerItem.toFolder(),
+                                        searchQuery = searchQuery,
+                                        onSearchChange = { searchQuery = it },
+                                        sims = sims,
+                                        mapper = threadRowMapper,
+                                        loading = threadsLoading,
+                                        onThreadClick = { openConversation(it) },
+                                        onThreadLongPress = { showThreadMenu = it },
+                                        emptyText = when {
+                                            threadsLoading -> "Loading conversations..."
+                                            !smsPermissionGranted -> "Grant SMS access to load conversations"
+                                            drawerItem == DrawerItem.Spam -> "No spam messages"
+                                            drawerItem == DrawerItem.Archived -> "No archived conversations"
+                                            drawerItem == DrawerItem.Pinned -> "No pinned conversations"
+                                            else -> "No conversations yet"
+                                        },
+                                    )
+                                    is InboxPane.Chat -> selectedThread?.takeIf { it.id == pane.threadId }?.let { thread ->
+                                        val screenModel = screenMapper.map(thread, messages, sims, composerState)
+                                        Column(Modifier.fillMaxSize()) {
+                                            ConversationTopBar(
+                                                thread = thread,
+                                                headerSubtitle = screenModel.header.subtitle,
+                                                onNavigateBack = { navigateBack() },
+                                                onSearchToggle = { conversationSearchActive = !conversationSearchActive },
+                                                onCall = {
+                                                    val uri = Uri.parse("tel:${thread.address}")
+                                                    context.startActivity(Intent(Intent.ACTION_DIAL, uri))
+                                                },
+                                            )
+                                            ConversationScreenContent(
+                                                screen = screenModel,
+                                                sims = sims,
+                                                searchActive = conversationSearchActive,
+                                                searchQuery = conversationSearchQuery,
+                                                onSearchQueryChange = { conversationSearchQuery = it },
+                                                matchingIds = conversationSearchMatcher.matchingIds(messages.map { SearchableMessage(it.id, it.body, it.address) }, conversationSearchQuery),
+                                                onBodyChange = { composerState = composerReducer.reduce(composerState, SmsComposerEvent.BodyChanged(it)) },
+                                                onSimSelected = { composerState = composerReducer.reduce(composerState, SmsComposerEvent.SubscriptionSelected(it)) },
+                                                onSend = {
+                                                    val state = composerReducer.reduce(composerState, SmsComposerEvent.SendRequested)
+                                                    composerState = state
+                                                    if (state.error != null) return@ConversationScreenContent
+                                                    val text = state.body.trim()
+                                                    scope.launch {
+                                                        val telephonyId = repository.persistOutgoing(thread.address, text, state.selectedSubscriptionId)
+                                                        repository.markSending(telephonyId)
+                                                        repository.syncTelephonyMessagesByIds(listOf(telephonyId))
+                                                        sender.send(SmsSendRequest(thread.address, text, state.selectedSubscriptionId, telephonyId))
+                                                        composerState = composerReducer.reduce(state, SmsComposerEvent.SendCompleted)
+                                                        messages = repository.loadLocalMessages(thread.id)
+                                                        refreshThreadsLocal()
+                                                    }
+                                                },
+                                                onRetry = { messageId ->
+                                                    val message = messages.firstOrNull { it.id == messageId } ?: return@ConversationScreenContent
+                                                    val telephonyId = message.telephonyId ?: return@ConversationScreenContent
+                                                    scope.launch {
+                                                        repository.markSending(telephonyId)
+                                                        sender.send(SmsSendRequest(message.address, message.body, message.simSlot, telephonyId))
+                                                        repository.syncTelephonyMessagesByIds(listOf(telephonyId))
+                                                        messages = repository.loadLocalMessages(thread.id)
+                                                    }
+                                                },
+                                            )
+                                        }
                                     }
-                                },
-                            )
+                                }
+                            }
                         }
                         AppScreen.Settings -> SettingsListScreen(onCategoryClick = { settingsCategory = it; screen = AppScreen.SettingsDetail })
                         AppScreen.SettingsDetail -> settingsCategory?.let { category ->
@@ -566,15 +656,19 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                 onDismiss = { showThreadMenu = null },
                 onAction = { action ->
                     showThreadMenu = null
-                    threads = ThreadListOptimisticUpdate.applyAction(threads, thread, action)
-                    threads = ThreadListOptimisticUpdate.filterForFolder(threads, folder)
-                    scope.launch {
-                        when (action) {
-                            ThreadBulkAction.MarkRead -> repository.markThreadRead(thread.id)
-                            ThreadBulkAction.Archive -> repository.updateArchived(thread.id, !thread.isArchived)
-                            ThreadBulkAction.MarkSpam -> repository.updateSpam(thread.id, !thread.isSpam)
-                            ThreadBulkAction.Mute -> repository.updateMuted(thread.id, !thread.isMuted)
-                            ThreadBulkAction.Delete -> repository.deleteThreadMessages(thread.id)
+                    if (action == ThreadBulkAction.Delete) {
+                        deleteThreadWithUndo(thread)
+                    } else {
+                        threads = ThreadListOptimisticUpdate.applyAction(threads, thread, action)
+                        threads = ThreadListOptimisticUpdate.filterForFolder(threads, folder)
+                        scope.launch {
+                            when (action) {
+                                ThreadBulkAction.MarkRead -> repository.markThreadRead(thread.id)
+                                ThreadBulkAction.Archive -> repository.updateArchived(thread.id, !thread.isArchived)
+                                ThreadBulkAction.MarkSpam -> repository.updateSpam(thread.id, !thread.isSpam)
+                                ThreadBulkAction.Mute -> repository.updateMuted(thread.id, !thread.isMuted)
+                                ThreadBulkAction.Delete -> Unit
+                            }
                         }
                     }
                 },
@@ -778,17 +872,6 @@ private fun ConversationScreenContent(
                 singleLine = true,
             )
         }
-        Row(
-            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            ContactAvatar(displayName = screen.header.title, photoUri = screen.header.photoUri)
-            Column {
-                Text(screen.header.title, style = MaterialTheme.typography.titleMedium)
-                screen.header.subtitle?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
-            }
-        }
         LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(visibleMessages, key = { it.id }) { row ->
                 ConversationBubbleRow(
@@ -800,6 +883,39 @@ private fun ConversationScreenContent(
         }
         MessageComposerPanel(body = screen.composer.body, sims = sims, selectedSubscriptionId = screen.composer.selectedSubscriptionId, sending = screen.composer.sending, error = screen.composer.error?.name, onBodyChange = onBodyChange, onSimSelected = onSimSelected, onSend = onSend)
     }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ConversationTopBar(
+    thread: SmsThread,
+    headerSubtitle: String?,
+    onNavigateBack: () -> Unit,
+    onSearchToggle: () -> Unit,
+    onCall: () -> Unit,
+) {
+    TopAppBar(
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                ContactAvatar(
+                    displayName = thread.displayName.ifBlank { thread.address },
+                    photoUri = thread.contactPhotoUri,
+                    size = 32.dp,
+                )
+                Column {
+                    Text(thread.displayName.ifBlank { thread.address })
+                    headerSubtitle?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
+                }
+            }
+        },
+        navigationIcon = {
+            IconButton(onClick = onNavigateBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+        },
+        actions = {
+            IconButton(onClick = onSearchToggle) { Icon(Icons.Default.Search, "Search") }
+            IconButton(onClick = onCall) { Icon(Icons.Default.Call, "Call") }
+        },
+    )
 }
 
 @Composable

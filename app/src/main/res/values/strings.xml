@@ -7,4 +7,6 @@
     <string name="notification_reply_hint">Type a reply</string>
     <string name="notification_code_copied">Code copied</string>
     <string name="notification_code_clip_label">Verification code</string>
+    <string name="thread_deleted">Chat deleted</string>
+    <string name="undo">Undo</string>
 </resources>

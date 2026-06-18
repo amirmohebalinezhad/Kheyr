@@ -189,13 +189,21 @@ interface SmsDao {
         if (existing == null) {
             insertSms(message)
         } else {
+            val direction = if (
+                existing.direction == MessageDirection.Outgoing &&
+                message.direction == MessageDirection.Incoming
+            ) {
+                MessageDirection.Outgoing
+            } else {
+                message.direction
+            }
             updateTelephonyMessage(
                 telephonyId = telephonyId,
                 threadId = message.threadId,
                 address = message.address,
                 body = message.body,
                 timestamp = message.timestamp,
-                direction = message.direction,
+                direction = direction,
                 status = message.status,
                 read = message.read,
                 simSlot = message.simSlot,

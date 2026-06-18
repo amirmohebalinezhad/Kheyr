@@ -147,11 +147,7 @@ class SmsRepository(
             val messages = mutableListOf<SmsMessageEntity>()
             while (cursor.moveToNext()) {
                 val messageType = cursor.getInt(type)
-                val direction = if (messageType == Telephony.Sms.MESSAGE_TYPE_SENT || messageType == Telephony.Sms.MESSAGE_TYPE_OUTBOX) {
-                    MessageDirection.Outgoing
-                } else {
-                    MessageDirection.Incoming
-                }
+                val direction = TelephonyDirectionMapper.directionFromType(messageType)
                 val status = when (messageType) {
                     Telephony.Sms.MESSAGE_TYPE_SENT -> MessageStatus.Sent
                     Telephony.Sms.MESSAGE_TYPE_FAILED -> MessageStatus.Failed
@@ -186,6 +182,15 @@ class SmsRepository(
 
     suspend fun deleteThreadMessages(threadId: Long) =
         withContext(Dispatchers.IO) { smsDao.deleteThreadMessages(threadId) }
+
+    suspend fun loadLocalMessageEntities(threadId: Long): List<SmsMessageEntity> = withContext(Dispatchers.IO) {
+        smsDao.messagesForThread(threadId)
+    }
+
+    suspend fun restoreThreadMessages(messages: List<SmsMessageEntity>) = withContext(Dispatchers.IO) {
+        if (messages.isEmpty()) return@withContext
+        smsDao.insertSmsBatch(messages.map { it.copy(id = 0) })
+    }
 
     suspend fun loadLocalMessages(threadId: Long): List<SmsMessage> = withContext(Dispatchers.IO) {
         smsDao.messagesForThread(threadId).map { it.toModel() }
@@ -278,6 +283,10 @@ class SmsRepository(
     fun markFailed(telephonyId: Long) {
         updateMessage(telephonyId, Telephony.Sms.MESSAGE_TYPE_FAILED, Telephony.Sms.STATUS_FAILED)
         smsDao.updateSendStatusByTelephonyId(telephonyId, MessageStatus.Failed)
+    }
+
+    fun notifyRefreshForTelephonyId(telephonyId: Long) {
+        smsDao.messageByTelephonyId(telephonyId)?.threadId?.let { SmsRefreshEvents.notifyThreadChanged(it) }
     }
 
     private fun updateMessage(messageId: Long, type: Int, status: Int) {
