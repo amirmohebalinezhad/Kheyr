@@ -21,6 +21,6 @@ class DigitNormalizerTest {
 
     @Test
     fun digitsOnlyStripsNonDigits() {
-        assertEquals("09123456789", DigitNormalizer.digitsOnly("+98 (912) 345-6789"))
+        assertEquals("989123456789", DigitNormalizer.digitsOnly("+98 (912) 345-6789"))
     }
 }

@@ -798,6 +798,7 @@ private fun ConversationBubbleRow(row: ConversationMessageRow, highlight: String
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun MessageBubbleContent(row: ConversationMessageRow, highlight: String?, onRetry: () -> Unit, emojiStyle: Boolean) {
     val clipboard = LocalClipboardManager.current
