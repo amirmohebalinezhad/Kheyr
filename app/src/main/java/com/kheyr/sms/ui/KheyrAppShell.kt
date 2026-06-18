@@ -68,6 +68,7 @@ import com.kheyr.sms.settings.ThemePreference
 import com.kheyr.sms.settings.ThemePreferenceResolver
 import com.kheyr.sms.settings.UnknownSenderNotificationMode
 import com.kheyr.sms.settings.NotificationContentMode
+import com.kheyr.sms.telephony.ComposerSimResolver
 import com.kheyr.sms.telephony.SimCard
 import com.kheyr.sms.telephony.SimRepository
 import com.kheyr.sms.telephony.SmsSendRequest
@@ -168,16 +169,21 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
     val darkTheme = ThemePreferenceResolver.isDark(themePreference, systemDark)
     val colorScheme = if (darkTheme) darkColorScheme(primary = androidx.compose.ui.graphics.Color(0xFF0F8B8D)) else lightColorScheme(primary = androidx.compose.ui.graphics.Color(0xFF0F8B8D))
 
+    fun resolvedComposerSim(thread: SmsThread? = selectedThread): Int? =
+        ComposerSimResolver.resolve(sims, thread?.simSlot, preferences.defaultSubscriptionId)
+
+    fun composerStateForThread(thread: SmsThread): SmsComposerState = SmsComposerState(
+        selectedSubscriptionId = resolvedComposerSim(thread),
+        requiresSimSelection = sims.size > 1,
+    )
+
     fun openConversation(thread: SmsThread) {
         inboxNavForward = true
         selectedThread = thread
         messages = emptyList()
         conversationSearchActive = false
         conversationSearchQuery = ""
-        composerState = SmsComposerState(
-            selectedSubscriptionId = thread.simSlot ?: preferences.defaultSubscriptionId ?: sims.firstOrNull()?.subscriptionId,
-            requiresSimSelection = sims.size > 1,
-        )
+        composerState = composerStateForThread(thread)
         screen = AppScreen.Conversation
         scope.launch {
             repository.markThreadRead(thread.id)
@@ -337,7 +343,10 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
         contactsPermissionGranted = results[Manifest.permission.READ_CONTACTS] == true || hasPermission(Manifest.permission.READ_CONTACTS)
         contactRepository.invalidateCache()
         sims = simRepository.activeSims()
-        composerState = composerState.copy(requiresSimSelection = sims.size > 1, selectedSubscriptionId = preferences.defaultSubscriptionId ?: sims.firstOrNull()?.subscriptionId)
+        composerState = composerState.copy(
+            requiresSimSelection = sims.size > 1,
+            selectedSubscriptionId = resolvedComposerSim() ?: sims.firstOrNull()?.subscriptionId,
+        )
         refreshThreads()
         refreshContacts()
     }
@@ -389,8 +398,20 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
             sims = simRepository.activeSims()
             composerState = composerState.copy(
                 requiresSimSelection = sims.size > 1,
-                selectedSubscriptionId = preferences.defaultSubscriptionId ?: sims.firstOrNull()?.subscriptionId,
+                selectedSubscriptionId = resolvedComposerSim() ?: sims.firstOrNull()?.subscriptionId,
             )
+        }
+    }
+
+    LaunchedEffect(sims, selectedThread?.id) {
+        if (selectedThread != null) {
+            val resolved = resolvedComposerSim(selectedThread)
+            if (resolved != null) {
+                composerState = composerState.copy(
+                    selectedSubscriptionId = resolved,
+                    requiresSimSelection = sims.size > 1,
+                )
+            }
         }
     }
 
@@ -564,15 +585,26 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                                                 onBodyChange = { composerState = composerReducer.reduce(composerState, SmsComposerEvent.BodyChanged(it)) },
                                                 onSimSelected = { composerState = composerReducer.reduce(composerState, SmsComposerEvent.SubscriptionSelected(it)) },
                                                 onSend = {
-                                                    val state = composerReducer.reduce(composerState, SmsComposerEvent.SendRequested)
+                                                    val subscriptionId = resolvedComposerSim(thread)
+                                                        ?: composerState.selectedSubscriptionId
+                                                    if (subscriptionId == null) {
+                                                        composerState = composerState.copy(error = ComposerError.MissingSimSelection)
+                                                        return@ConversationScreenContent
+                                                    }
+                                                    val readyState = if (composerState.selectedSubscriptionId != subscriptionId) {
+                                                        composerState.copy(selectedSubscriptionId = subscriptionId)
+                                                    } else {
+                                                        composerState
+                                                    }
+                                                    val state = composerReducer.reduce(readyState, SmsComposerEvent.SendRequested)
                                                     composerState = state
                                                     if (state.error != null) return@ConversationScreenContent
                                                     val text = state.body.trim()
                                                     scope.launch {
-                                                        val telephonyId = repository.persistOutgoing(thread.address, text, state.selectedSubscriptionId)
+                                                        val telephonyId = repository.persistOutgoing(thread.address, text, subscriptionId)
                                                         repository.markSending(telephonyId)
                                                         repository.syncTelephonyMessagesByIds(listOf(telephonyId))
-                                                        sender.send(SmsSendRequest(thread.address, text, state.selectedSubscriptionId, telephonyId))
+                                                        sender.send(SmsSendRequest(thread.address, text, subscriptionId, telephonyId))
                                                         composerState = composerReducer.reduce(state, SmsComposerEvent.SendCompleted)
                                                         messages = repository.loadLocalMessages(thread.id)
                                                         refreshThreadsLocal()
