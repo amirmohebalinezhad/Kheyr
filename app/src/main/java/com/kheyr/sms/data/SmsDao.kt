@@ -235,6 +235,14 @@ interface SmsDao {
     @Query("SELECT COALESCE(s.isSpam, 0) FROM thread_state s WHERE s.threadId = :threadId")
     fun isThreadSpam(threadId: Long): Boolean?
 
+    @Query("""
+        SELECT threadId FROM messages
+        WHERE address = :address AND body = :body AND direction = 'Outgoing'
+        AND timestamp >= :since
+        ORDER BY timestamp DESC LIMIT 1
+    """)
+    fun recentOutgoingThreadId(address: String, body: String, since: Instant): Long?
+
     @Query("SELECT * FROM sync_spam_metadata WHERE threadId = :threadId")
     fun syncSpamMetadata(threadId: Long): SyncSpamMetadataEntity?
 }

@@ -1,6 +1,7 @@
 package com.kheyr.sms.contacts
 
 import android.Manifest
+import android.content.ContentUris
 import android.content.Context
 import android.content.pm.PackageManager
 import android.net.Uri
@@ -14,20 +15,23 @@ data class DeviceContact(
     val id: Long,
     val displayName: String,
     val phoneNumber: String,
+    val photoUri: Uri? = null,
 )
 
 class ContactRepository(private val context: Context) {
     @Volatile
-    private var cachedNameIndex: Map<String, String>? = null
+    private var cachedContactData: CachedContactData? = null
 
     fun invalidateCache() {
-        cachedNameIndex = null
+        cachedContactData = null
     }
+
     fun hasContactsPermission(): Boolean =
         ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
 
     suspend fun loadContacts(): List<DeviceContact> = withContext(Dispatchers.IO) {
         if (!hasContactsPermission()) return@withContext emptyList()
+        val photoByContactId = loadPhotoUriByContactId()
         val contacts = mutableListOf<DeviceContact>()
         val seen = mutableSetOf<String>()
         context.contentResolver.query(
@@ -47,55 +51,68 @@ class ContactRepository(private val context: Context) {
             while (cursor.moveToNext()) {
                 val number = cursor.getString(numberCol).orEmpty().trim()
                 if (number.isEmpty()) continue
-                val dedupeKey = "${cursor.getLong(idCol)}:$number"
+                val contactId = cursor.getLong(idCol)
+                val dedupeKey = "$contactId:$number"
                 if (!seen.add(dedupeKey)) continue
                 contacts += DeviceContact(
-                    id = cursor.getLong(idCol),
+                    id = contactId,
                     displayName = cursor.getString(nameCol).orEmpty().ifBlank { number },
                     phoneNumber = number,
+                    photoUri = photoByContactId[contactId],
                 )
             }
         }
         contacts
     }
 
-    suspend fun lookupDisplayName(phoneNumber: String): String? = withContext(Dispatchers.IO) {
+    suspend fun lookupProfile(phoneNumber: String): ContactProfile? = withContext(Dispatchers.IO) {
         if (!hasContactsPermission() || phoneNumber.isBlank()) return@withContext null
-        val uri = Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(phoneNumber))
-        context.contentResolver.query(
-            uri,
-            arrayOf(ContactsContract.PhoneLookup.DISPLAY_NAME),
-            null,
-            null,
-            null,
-        )?.use { cursor ->
-            if (cursor.moveToFirst()) cursor.getString(0)?.takeIf { it.isNotBlank() } else null
-        }
+        getContactData().profileIndex[phoneNumber]
+            ?: getContactData().profileIndex[PhoneNumberNormalizer.normalize(phoneNumber)]
+            ?: lookupProfileSync(phoneNumber)
     }
 
     suspend fun enrichThreads(threads: List<SmsThread>): List<SmsThread> = withContext(Dispatchers.IO) {
         if (!hasContactsPermission() || threads.isEmpty()) return@withContext threads
-        val nameIndex = getNameIndex()
-        val cache = mutableMapOf<String, String?>()
+        val data = getContactData()
         threads.map { thread ->
-            if (thread.displayName != thread.address && thread.displayName.isNotBlank()) return@map thread
-            val resolved = resolveDisplayName(thread.address, nameIndex, cache)
-            resolved?.let { thread.copy(displayName = it) } ?: thread
+            val profile = data.profileIndex[thread.address]
+                ?: data.profileIndex[PhoneNumberNormalizer.normalize(thread.address)]
+            if (profile == null && thread.displayName != thread.address && thread.displayName.isNotBlank()) {
+                thread
+            } else {
+                thread.copy(
+                    displayName = profile?.displayName?.takeIf { it.isNotBlank() }
+                        ?: thread.displayName.takeIf { it.isNotBlank() && it != thread.address }
+                        ?: thread.address,
+                    contactPhotoUri = profile?.photoUri ?: thread.contactPhotoUri,
+                )
+            }
         }
     }
 
-    private suspend fun getNameIndex(): Map<String, String> {
-        cachedNameIndex?.let { return it }
-        val built = buildNameIndex()
-        cachedNameIndex = built
+    fun matchesAddress(first: String, second: String): Boolean = PhoneNumberNormalizer.matches(first, second)
+
+    private data class CachedContactData(
+        val nameIndex: Map<String, String>,
+        val profileIndex: Map<String, ContactProfile>,
+    )
+
+    private suspend fun getContactData(): CachedContactData {
+        cachedContactData?.let { return it }
+        val built = buildContactData()
+        cachedContactData = built
         return built
     }
 
-    private fun buildNameIndex(): Map<String, String> {
-        val index = mutableMapOf<String, String>()
+    private fun buildContactData(): CachedContactData {
+        val nameIndex = mutableMapOf<String, String>()
+        val profileIndex = mutableMapOf<String, ContactProfile>()
+        val photoByContactId = loadPhotoUriByContactId()
         context.contentResolver.query(
             ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
             arrayOf(
+                ContactsContract.CommonDataKinds.Phone.CONTACT_ID,
                 ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
                 ContactsContract.CommonDataKinds.Phone.NUMBER,
             ),
@@ -103,6 +120,7 @@ class ContactRepository(private val context: Context) {
             null,
             null,
         )?.use { cursor ->
+            val idCol = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.CONTACT_ID)
             val nameCol = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
             val numberCol = cursor.getColumnIndexOrThrow(ContactsContract.CommonDataKinds.Phone.NUMBER)
             while (cursor.moveToNext()) {
@@ -110,35 +128,58 @@ class ContactRepository(private val context: Context) {
                 if (name.isBlank()) continue
                 val number = cursor.getString(numberCol).orEmpty().trim()
                 if (number.isEmpty()) continue
-                index.putIfAbsent(number, name)
-                index.putIfAbsent(PhoneNumberNormalizer.normalize(number), name)
+                val contactId = cursor.getLong(idCol)
+                val profile = ContactProfile(
+                    displayName = name,
+                    photoUri = photoByContactId[contactId],
+                    contactId = contactId,
+                )
+                nameIndex.putIfAbsent(number, name)
+                nameIndex.putIfAbsent(PhoneNumberNormalizer.normalize(number), name)
+                profileIndex.putIfAbsent(number, profile)
+                profileIndex.putIfAbsent(PhoneNumberNormalizer.normalize(number), profile)
             }
         }
-        return index
+        return CachedContactData(nameIndex, profileIndex)
     }
 
-    private fun resolveDisplayName(
-        address: String,
-        nameIndex: Map<String, String>,
-        cache: MutableMap<String, String?>,
-    ): String? = cache.getOrPut(address) {
-        nameIndex[address]
-            ?: nameIndex[PhoneNumberNormalizer.normalize(address)]
-            ?: lookupDisplayNameSync(address)
+    private fun loadPhotoUriByContactId(): Map<Long, Uri> {
+        val photos = mutableMapOf<Long, Uri>()
+        context.contentResolver.query(
+            ContactsContract.Contacts.CONTENT_URI,
+            arrayOf(ContactsContract.Contacts._ID, ContactsContract.Contacts.PHOTO_URI),
+            "${ContactsContract.Contacts.HAS_PHONE_NUMBER} = 1",
+            null,
+            null,
+        )?.use { cursor ->
+            val idCol = cursor.getColumnIndexOrThrow(ContactsContract.Contacts._ID)
+            val photoCol = cursor.getColumnIndexOrThrow(ContactsContract.Contacts.PHOTO_URI)
+            while (cursor.moveToNext()) {
+                val photo = cursor.getString(photoCol)?.takeIf { it.isNotBlank() } ?: continue
+                photos[cursor.getLong(idCol)] = Uri.parse(photo)
+            }
+        }
+        return photos
     }
 
-    private fun lookupDisplayNameSync(phoneNumber: String): String? {
+    private fun lookupProfileSync(phoneNumber: String): ContactProfile? {
         val uri = Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(phoneNumber))
         return context.contentResolver.query(
             uri,
-            arrayOf(ContactsContract.PhoneLookup.DISPLAY_NAME),
+            arrayOf(
+                ContactsContract.PhoneLookup.DISPLAY_NAME,
+                ContactsContract.PhoneLookup._ID,
+                ContactsContract.PhoneLookup.PHOTO_URI,
+            ),
             null,
             null,
             null,
         )?.use { cursor ->
-            if (cursor.moveToFirst()) cursor.getString(0)?.takeIf { it.isNotBlank() } else null
+            if (!cursor.moveToFirst()) return null
+            val name = cursor.getString(0)?.takeIf { it.isNotBlank() }
+            val contactId = cursor.getLong(1)
+            val photo = cursor.getString(2)?.takeIf { it.isNotBlank() }?.let(Uri::parse)
+            ContactProfile(displayName = name, photoUri = photo, contactId = contactId)
         }
     }
-
-    fun matchesAddress(first: String, second: String): Boolean = PhoneNumberNormalizer.matches(first, second)
 }

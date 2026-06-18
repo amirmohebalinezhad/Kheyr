@@ -12,25 +12,32 @@ class SmsSendStatusReceiver : BroadcastReceiver() {
         val messageId = intent.getLongExtra(SmsSender.EXTRA_MESSAGE_ID, -1L).takeIf { it > 0L } ?: return
         val partIndex = intent.getIntExtra(SmsSender.EXTRA_PART_INDEX, 0)
         val partCount = intent.getIntExtra(SmsSender.EXTRA_PART_COUNT, 1).coerceAtLeast(1)
-        val repository = SmsRepository(context)
-        when (intent.action) {
-            SmsSender.ACTION_SMS_SENT -> {
-                if (resultCode == Activity.RESULT_OK) {
-                    if (recordSuccessfulPart(context, "sent", messageId, partIndex, partCount)) {
-                        repository.markSent(messageId)
+        val pendingResult = goAsync()
+        Thread {
+            try {
+                val repository = SmsRepository(context)
+                when (intent.action) {
+                    SmsSender.ACTION_SMS_SENT -> {
+                        if (resultCode == Activity.RESULT_OK) {
+                            if (recordSuccessfulPart(context, "sent", messageId, partIndex, partCount)) {
+                                repository.markSent(messageId)
+                            }
+                        } else {
+                            clearPartProgress(context, "sent", messageId)
+                            clearPartProgress(context, "delivered", messageId)
+                            repository.markFailed(messageId)
+                        }
                     }
-                } else {
-                    clearPartProgress(context, "sent", messageId)
-                    clearPartProgress(context, "delivered", messageId)
-                    repository.markFailed(messageId)
+                    SmsSender.ACTION_SMS_DELIVERED -> {
+                        if (resultCode == Activity.RESULT_OK && recordSuccessfulPart(context, "delivered", messageId, partIndex, partCount)) {
+                            repository.markDelivered(messageId)
+                        }
+                    }
                 }
+            } finally {
+                pendingResult.finish()
             }
-            SmsSender.ACTION_SMS_DELIVERED -> {
-                if (resultCode == Activity.RESULT_OK && recordSuccessfulPart(context, "delivered", messageId, partIndex, partCount)) {
-                    repository.markDelivered(messageId)
-                }
-            }
-        }
+        }.start()
     }
 
     private fun recordSuccessfulPart(

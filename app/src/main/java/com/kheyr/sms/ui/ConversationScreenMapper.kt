@@ -34,6 +34,7 @@ class ConversationScreenMapper(
                     displayName = thread.displayName,
                     subscriptionId = thread.simSlot,
                     messageCount = messages.size,
+                    photoUri = thread.contactPhotoUri,
                 ),
                 sims,
             ),

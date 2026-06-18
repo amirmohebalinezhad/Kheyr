@@ -180,6 +180,10 @@ class SmsRepository(
         }
     }
 
+    suspend fun recentOutgoingThreadId(address: String, body: String, withinSeconds: Long = 120): Long? = withContext(Dispatchers.IO) {
+        smsDao.recentOutgoingThreadId(address, body, Instant.now().minusSeconds(withinSeconds))
+    }
+
     suspend fun deleteThreadMessages(threadId: Long) =
         withContext(Dispatchers.IO) { smsDao.deleteThreadMessages(threadId) }
 

@@ -101,6 +101,7 @@ fun KheyrAppShell() {
     var threadsLoading by remember { mutableStateOf(false) }
     var contacts by remember { mutableStateOf<List<DeviceContact>>(emptyList()) }
     var contactsLoading by remember { mutableStateOf(false) }
+    var contactsSearchQuery by remember { mutableStateOf("") }
     var selectedThread by remember { mutableStateOf<SmsThread?>(null) }
     var messages by remember { mutableStateOf<List<SmsMessage>>(emptyList()) }
     var composerState by remember { mutableStateOf(SmsComposerState()) }
@@ -169,13 +170,14 @@ fun KheyrAppShell() {
         val existing = threads.firstOrNull { contactRepository.matchesAddress(it.address, contact.phoneNumber) }
         val threadId = existing?.id ?: Telephony.Threads.getOrCreateThreadId(context, setOf(contact.phoneNumber))
         openConversation(
-            existing?.copy(displayName = contact.displayName)
+            existing?.copy(displayName = contact.displayName, contactPhotoUri = contact.photoUri)
                 ?: SmsThread(
                     id = threadId,
                     address = contact.phoneNumber,
                     displayName = contact.displayName,
                     lastMessage = "",
                     lastMessageAt = Instant.now(),
+                    contactPhotoUri = contact.photoUri,
                 ),
         )
     }
@@ -348,16 +350,26 @@ fun KheyrAppShell() {
                 topBar = {
                     TopAppBar(
                         title = {
-                            Text(
-                                when {
-                                    screen == AppScreen.Conversation -> selectedThread?.displayName?.ifBlank { selectedThread?.address.orEmpty() }.orEmpty()
-                                    screen == AppScreen.Settings -> "Settings"
-                                    screen == AppScreen.DesktopSync -> "Desktop Sync"
-                                    screen == AppScreen.Help -> "Help & Feedback"
-                                    screen == AppScreen.Contacts -> "Contacts"
-                                    else -> drawerItem.title
-                                },
-                            )
+                            when {
+                                screen == AppScreen.Conversation -> {
+                                    val thread = selectedThread
+                                    if (thread != null) {
+                                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            ContactAvatar(
+                                                displayName = thread.displayName.ifBlank { thread.address },
+                                                photoUri = thread.contactPhotoUri,
+                                                size = 32.dp,
+                                            )
+                                            Text(thread.displayName.ifBlank { thread.address })
+                                        }
+                                    }
+                                }
+                                screen == AppScreen.Settings -> Text("Settings")
+                                screen == AppScreen.DesktopSync -> Text("Desktop Sync")
+                                screen == AppScreen.Help -> Text("Help & Feedback")
+                                screen == AppScreen.Contacts -> Text("Contacts")
+                                else -> Text(drawerItem.title)
+                            }
                         },
                         navigationIcon = {
                             when {
@@ -499,9 +511,17 @@ fun KheyrAppShell() {
                         AppScreen.DesktopSync -> DesktopSyncScreen(apiBaseUrl = ApiConfig.baseUrl, onRevoke = { statusMessage = "Revoke device via Settings when backend is configured." })
                         AppScreen.Help -> HelpScreen()
                         AppScreen.Contacts -> ContactsScreen(
-                            contacts = contacts,
+                            contacts = contacts.filter { contact ->
+                                val query = contactsSearchQuery.trim()
+                                if (query.isBlank()) true else {
+                                    contact.displayName.contains(query, ignoreCase = true) ||
+                                        contact.phoneNumber.contains(query, ignoreCase = true)
+                                }
+                            },
                             loading = contactsLoading,
                             hasPermission = contactsPermissionGranted,
+                            searchQuery = contactsSearchQuery,
+                            onSearchChange = { contactsSearchQuery = it },
                             onRequestPermission = { permissionLauncher.launch(requiredPermissions()) },
                             onContactClick = { openConversationForContact(it) },
                         )
@@ -671,9 +691,10 @@ private fun ThreadFolderScreen(
                         }
                     },
                     leadingContent = {
-                        Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(40.dp)) {
-                            Box(contentAlignment = Alignment.Center) { Text(row.title.take(1).uppercase()) }
-                        }
+                        ContactAvatar(
+                            displayName = row.title,
+                            photoUri = thread.contactPhotoUri,
+                        )
                     },
                     overlineContent = {
                         Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -740,8 +761,16 @@ private fun ConversationScreenContent(
                 singleLine = true,
             )
         }
-        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Column { Text(screen.header.title, style = MaterialTheme.typography.titleMedium); screen.header.subtitle?.let { Text(it, style = MaterialTheme.typography.labelSmall) } }
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            ContactAvatar(displayName = screen.header.title, photoUri = screen.header.photoUri)
+            Column {
+                Text(screen.header.title, style = MaterialTheme.typography.titleMedium)
+                screen.header.subtitle?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
+            }
         }
         LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(visibleMessages, key = { it.id }) { row ->
@@ -917,6 +946,8 @@ private fun ContactsScreen(
     contacts: List<DeviceContact>,
     loading: Boolean,
     hasPermission: Boolean,
+    searchQuery: String,
+    onSearchChange: (String) -> Unit,
     onRequestPermission: () -> Unit,
     onContactClick: (DeviceContact) -> Unit,
 ) {
@@ -943,21 +974,38 @@ private fun ContactsScreen(
             }
         }
         else -> {
-            LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
-                items(contacts, key = { "${it.id}:${it.phoneNumber}" }) { contact ->
-                    ListItem(
-                        headlineContent = { Text(contact.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        supportingContent = { Text(contact.phoneNumber) },
-                        leadingContent = {
-                            Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.primaryContainer, modifier = Modifier.size(40.dp)) {
-                                Box(contentAlignment = Alignment.Center) { Text(contact.displayName.take(1).uppercase()) }
-                            }
-                        },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onContactClick(contact) },
-                    )
-                    HorizontalDivider()
+            Column(Modifier.fillMaxSize()) {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = onSearchChange,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    placeholder = { Text("Search contacts") },
+                    singleLine = true,
+                    leadingIcon = { Icon(Icons.Default.Search, null) },
+                )
+                if (contacts.isEmpty()) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("No contacts match your search")
+                    }
+                } else {
+                    LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
+                        items(contacts, key = { "${it.id}:${it.phoneNumber}" }) { contact ->
+                            ListItem(
+                                headlineContent = { Text(contact.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                                supportingContent = { Text(contact.phoneNumber) },
+                                leadingContent = {
+                                    ContactAvatar(
+                                        displayName = contact.displayName,
+                                        photoUri = contact.photoUri,
+                                    )
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable { onContactClick(contact) },
+                            )
+                            HorizontalDivider()
+                        }
+                    }
                 }
             }
         }

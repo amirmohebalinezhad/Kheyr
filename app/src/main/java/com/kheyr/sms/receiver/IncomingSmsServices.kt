@@ -9,6 +9,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
 import android.net.Uri
 import android.os.Build
 import android.provider.ContactsContract
@@ -17,6 +18,8 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.kheyr.sms.MainActivity
+import com.kheyr.sms.contacts.ContactRepository
+import com.kheyr.sms.contacts.PhoneNumberNormalizer
 import com.kheyr.sms.data.AppDatabase
 import com.kheyr.sms.data.SmsRepository
 import com.kheyr.sms.domain.SpamClassification
@@ -24,6 +27,7 @@ import com.kheyr.sms.domain.SpamRuleSet
 import com.kheyr.sms.preferences.AppPreferences
 import com.kheyr.sms.settings.NotificationPolicyResolver
 import com.kheyr.sms.settings.ThreadNotificationSettings
+import com.kheyr.sms.telephony.OwnNumberResolver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import java.time.Instant
@@ -37,6 +41,7 @@ class RoomIncomingSmsStore(
     private val repository: SmsRepository,
     private val preferences: AppPreferences,
     private val markSpam: Boolean,
+    private val ownNumberResolver: OwnNumberResolver,
 ) : SpamMessageStore, InboxMessageStore {
     override fun persistSpam(message: IncomingSms, score: Int, triggeredRuleIds: List<String>) {
         persist(message, spam = true)
@@ -45,6 +50,20 @@ class RoomIncomingSmsStore(
     override fun persistInbox(message: IncomingSms): StoredIncomingSms = persist(message, spam = false)
 
     private fun persist(message: IncomingSms, spam: Boolean): StoredIncomingSms {
+        if (!spam && ownNumberResolver.isOwnNumber(message.sender)) {
+            runBlocking(Dispatchers.IO) {
+                repository.recentOutgoingThreadId(message.sender, message.body)
+            }?.let { threadId ->
+                return StoredIncomingSms(
+                    threadId,
+                    message.sender,
+                    message.body,
+                    message.receivedAtMillis,
+                    message.simSlot,
+                    message.subscriptionId,
+                )
+            }
+        }
         val values = ContentValues().apply {
             put(Telephony.Sms.ADDRESS, message.sender)
             put(Telephony.Sms.BODY, message.body)
@@ -84,18 +103,23 @@ class PolicyAwareIncomingSmsNotifier(
     private val context: Context,
     private val preferences: AppPreferences,
     private val dao: AppDatabase,
+    private val contactRepository: ContactRepository,
 ) : IncomingSmsNotifier {
     private val resolver = NotificationPolicyResolver()
 
     override fun show(message: StoredIncomingSms, senderIsContact: Boolean) {
+        if (!canPostNotifications()) return
+        val profile = runBlocking(Dispatchers.IO) { contactRepository.lookupProfile(message.sender) }
+        val displayName = profile?.displayName?.takeIf { it.isNotBlank() } ?: message.sender
+        val senderIsKnown = senderIsContact || profile != null
         val globalSettings = preferences.notificationSettings()
         val muted = dao.smsDao().isThreadMuted(message.threadId) == true
         val decision = resolver.resolve(
             com.kheyr.sms.settings.NotificationPolicyInput(
                 sender = message.sender,
-                displayName = message.sender,
+                displayName = displayName,
                 preview = message.body,
-                senderIsContact = senderIsContact,
+                senderIsContact = senderIsKnown,
                 senderBlocked = preferences.isBlockedSender(message.sender),
                 spamClassification = SpamClassification.Normal,
                 globalSettings = globalSettings,
@@ -106,7 +130,13 @@ class PolicyAwareIncomingSmsNotifier(
         decision as com.kheyr.sms.settings.NotificationPolicyDecision.Post
         ensureChannel()
         val intent = Intent(context, MainActivity::class.java)
-        val pendingIntent = PendingIntent.getActivity(context, message.threadId.toInt(), intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val notificationId = stableNotificationId(message.threadId)
+        val pendingIntent = PendingIntent.getActivity(
+            context,
+            notificationId,
+            intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
         val builder = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.sym_action_chat)
             .setContentTitle(decision.title)
@@ -116,9 +146,27 @@ class PolicyAwareIncomingSmsNotifier(
         decision.body?.let(builder::setContentText)
         if (decision.soundMode == com.kheyr.sms.settings.NotificationSoundMode.Silent) {
             builder.setSilent(true)
+        } else if (decision.vibrate) {
+            builder.setDefaults(NotificationCompat.DEFAULT_VIBRATE)
         }
-        NotificationManagerCompat.from(context).notify(message.threadId.toInt(), builder.build())
+        profile?.photoUri?.let { loadNotificationIcon(it) }?.let(builder::setLargeIcon)
+        NotificationManagerCompat.from(context).notify(notificationId, builder.build())
     }
+
+    private fun canPostNotifications(): Boolean {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        ) {
+            return false
+        }
+        return NotificationManagerCompat.from(context).areNotificationsEnabled()
+    }
+
+    private fun loadNotificationIcon(photoUri: Uri) = runCatching {
+        context.contentResolver.openInputStream(photoUri)?.use(BitmapFactory::decodeStream)
+    }.getOrNull()
+
+    private fun stableNotificationId(threadId: Long): Int = (threadId xor (threadId ushr 32)).toInt()
 
     private fun ensureChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -135,7 +183,12 @@ class AndroidContactLookup(private val context: Context) : SenderContactLookup {
         if (sender.isBlank()) return false
         if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) != PackageManager.PERMISSION_GRANTED) return false
         val uri = Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(sender))
-        return context.contentResolver.query(uri, arrayOf(ContactsContract.PhoneLookup._ID), null, null, null)?.use { it.moveToFirst() } == true
+        val found = context.contentResolver.query(uri, arrayOf(ContactsContract.PhoneLookup._ID), null, null, null)?.use { it.moveToFirst() } == true
+        if (found) return true
+        val normalized = PhoneNumberNormalizer.normalize(sender)
+        if (normalized == sender) return false
+        val normalizedUri = Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(normalized))
+        return context.contentResolver.query(normalizedUri, arrayOf(ContactsContract.PhoneLookup._ID), null, null, null)?.use { it.moveToFirst() } == true
     }
 }
 

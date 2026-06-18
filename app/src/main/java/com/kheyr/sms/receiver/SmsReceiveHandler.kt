@@ -11,6 +11,7 @@ class SmsReceiveHandler(
     private val spamStore: SpamMessageStore,
     private val inboxStore: InboxMessageStore,
     private val notifier: IncomingSmsNotifier,
+    private val shouldNotify: (IncomingSms) -> Boolean = { true },
 ) {
     fun handle(message: IncomingSms): IncomingSmsResult {
         val senderIsContact = contactLookup.isKnownContact(message.sender)
@@ -20,7 +21,9 @@ class SmsReceiveHandler(
             IncomingSmsResult.SpamSuppressed
         } else {
             val storedMessage = inboxStore.persistInbox(message)
-            notifier.show(storedMessage, senderIsContact)
+            if (shouldNotify(message)) {
+                notifier.show(storedMessage, senderIsContact)
+            }
             IncomingSmsResult.NotificationPosted
         }
     }
