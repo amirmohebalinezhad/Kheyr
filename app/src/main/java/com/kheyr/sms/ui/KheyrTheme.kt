@@ -1,5 +1,6 @@
 package com.kheyr.sms.ui
 
+import android.app.Activity
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
@@ -7,8 +8,11 @@ import androidx.compose.material3.Shapes
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.unit.dp
+import androidx.core.view.WindowCompat
 import com.kheyr.sms.settings.ThemePreference
 import com.kheyr.sms.settings.ThemePreferenceResolver
 
@@ -55,6 +59,8 @@ fun KheyrTheme(
     val darkTheme = ThemePreferenceResolver.isDark(themePreference, systemDark)
     val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
 
+    SyncSystemBarAppearance(useDarkTheme = darkTheme)
+
     MaterialTheme(
         colorScheme = colorScheme,
         typography = KheyrTypography.typography,
@@ -67,4 +73,18 @@ fun KheyrTheme(
 fun isKheyrDarkTheme(themePreference: ThemePreference = ThemePreference.System): Boolean {
     val systemDark = isSystemInDarkTheme()
     return ThemePreferenceResolver.isDark(themePreference, systemDark)
+}
+
+@Composable
+private fun SyncSystemBarAppearance(useDarkTheme: Boolean) {
+    val view = LocalView.current
+    if (!view.isInEditMode) {
+        SideEffect {
+            val window = (view.context as? Activity)?.window ?: return@SideEffect
+            WindowCompat.getInsetsController(window, view).apply {
+                isAppearanceLightStatusBars = !useDarkTheme
+                isAppearanceLightNavigationBars = !useDarkTheme
+            }
+        }
+    }
 }
