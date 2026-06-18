@@ -19,7 +19,6 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -33,16 +32,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.AnnotatedString
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextDirection
-import com.kheyr.sms.util.MessageCopyableSegmentDetector
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.kheyr.sms.KheyrApplication
 import com.kheyr.sms.R
@@ -66,7 +56,6 @@ import com.kheyr.sms.settings.NotificationSettings
 import com.kheyr.sms.settings.SettingsCategory
 import com.kheyr.sms.settings.SettingsCategoryOrder
 import com.kheyr.sms.settings.ThemePreference
-import com.kheyr.sms.settings.ThemePreferenceResolver
 import com.kheyr.sms.settings.UnknownSenderNotificationMode
 import com.kheyr.sms.settings.NotificationContentMode
 import com.kheyr.sms.telephony.ComposerSimResolver
@@ -84,7 +73,7 @@ import kotlinx.coroutines.launch
 import com.kheyr.sms.util.JalaliDateFormatter
 import java.time.Instant
 
-enum class AppScreen { Onboarding, Threads, Conversation, Settings, SettingsDetail, DesktopSync, Help, Contacts }
+enum class AppScreen { Onboarding, Main, Conversation, SettingsDetail, DesktopSync, Help }
 
 private sealed interface InboxPane {
     data object List : InboxPane
@@ -109,8 +98,9 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
     val conversationSearchMatcher = remember { ConversationSearchMatcher() }
     val scope = rememberCoroutineScope()
 
-    var screen by remember { mutableStateOf(if (preferences.onboardingComplete) AppScreen.Threads else AppScreen.Onboarding) }
-    var drawerItem by remember { mutableStateOf(DrawerItem.AllMessages) }
+    var screen by remember { mutableStateOf(if (preferences.onboardingComplete) AppScreen.Main else AppScreen.Onboarding) }
+    var selectedTab by remember { mutableStateOf(MainTab.Chats) }
+    var chatFolder by remember { mutableStateOf(ChatFolder.All) }
     var settingsCategory by remember { mutableStateOf<SettingsCategory?>(null) }
     var threads by remember { mutableStateOf<List<SmsThread>>(emptyList()) }
     var threadsLoading by remember { mutableStateOf(false) }
@@ -125,11 +115,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
     var conversationSearchQuery by remember { mutableStateOf("") }
     var conversationSearchActive by remember { mutableStateOf(false) }
     var showThreadMenu by remember { mutableStateOf<SmsThread?>(null) }
-    var drawerOpen by remember { mutableStateOf(false) }
-    val drawerState = rememberDrawerState(DrawerValue.Closed)
-    LaunchedEffect(drawerOpen) {
-        if (drawerOpen) drawerState.open() else drawerState.close()
-    }
+    var chatsOverflowExpanded by remember { mutableStateOf(false) }
     var isDefaultSms by remember { mutableStateOf(DefaultSmsRoleChecker.isDefaultSmsApp(context)) }
     var smsPermissionGranted by remember {
         mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED)
@@ -167,9 +153,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
     var inboxNavForward by remember { mutableStateOf(true) }
     var pendingDeleteThreadId by remember { mutableStateOf<Long?>(null) }
 
-    val systemDark = isSystemInDarkTheme()
-    val darkTheme = ThemePreferenceResolver.isDark(themePreference, systemDark)
-    val colorScheme = if (darkTheme) darkColorScheme(primary = androidx.compose.ui.graphics.Color(0xFF0F8B8D)) else lightColorScheme(primary = androidx.compose.ui.graphics.Color(0xFF0F8B8D))
+    val darkTheme = isKheyrDarkTheme(themePreference)
 
     fun resolvedComposerSim(thread: SmsThread? = selectedThread): Int? =
         ComposerSimResolver.resolve(sims, thread?.simSlot, preferences.defaultSubscriptionId)
@@ -216,19 +200,18 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                 scope.launch {
                     selectedThread?.id?.let { repository.markThreadRead(it) }
                     selectedThread = null
-                    screen = AppScreen.Threads
+                    screen = AppScreen.Main
                     conversationSearchActive = false
                     conversationSearchQuery = ""
                 }
             }
-            screen == AppScreen.SettingsDetail -> screen = AppScreen.Settings
-            screen in listOf(AppScreen.Settings, AppScreen.DesktopSync, AppScreen.Help, AppScreen.Contacts) -> {
-                screen = AppScreen.Threads
-                drawerItem = DrawerItem.AllMessages
+            screen == AppScreen.SettingsDetail -> {
+                screen = AppScreen.Main
+                selectedTab = MainTab.Settings
             }
-            drawerOpen -> {
-                drawerOpen = false
-                scope.launch { drawerState.close() }
+            screen in listOf(AppScreen.DesktopSync, AppScreen.Help) -> {
+                screen = AppScreen.Main
+                selectedTab = MainTab.Chats
             }
         }
     }
@@ -236,8 +219,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
     val handleSystemBack = screen != AppScreen.Onboarding && (
         screen == AppScreen.Conversation ||
             screen == AppScreen.SettingsDetail ||
-            screen in listOf(AppScreen.Settings, AppScreen.DesktopSync, AppScreen.Help, AppScreen.Contacts) ||
-            drawerOpen
+            screen in listOf(AppScreen.DesktopSync, AppScreen.Help)
         )
 
     BackHandler(enabled = handleSystemBack) { navigateBack() }
@@ -245,13 +227,12 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
     fun hasPermission(permission: String) = ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
     fun gateState() = OnboardingGateState(isDefaultSms, smsPermissionGranted, contactsPermissionGranted, hasPermission(Manifest.permission.POST_NOTIFICATIONS) || Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU)
 
-    suspend fun loadThreadsForDrawer(): List<SmsThread> {
-        val loaded = when (drawerItem) {
-            DrawerItem.AllMessages -> repository.loadLocalThreads().let(ThreadSorter::inboxThreads)
-            DrawerItem.Spam -> repository.loadSpamThreads()
-            DrawerItem.Archived -> repository.loadArchivedThreads()
-            DrawerItem.Pinned -> repository.loadPinnedThreads()
-            else -> repository.loadLocalThreads()
+    suspend fun loadThreadsForFolder(): List<SmsThread> {
+        val loaded = when (chatFolder) {
+            ChatFolder.All -> repository.loadLocalThreads().let(ThreadSorter::inboxThreads)
+            ChatFolder.Spam -> repository.loadSpamThreads()
+            ChatFolder.Archived -> repository.loadArchivedThreads()
+            ChatFolder.Pinned -> repository.loadPinnedThreads()
         }
         return contactRepository.enrichThreads(loaded)
     }
@@ -274,7 +255,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
     fun refreshThreadsLocal() {
         if (!smsPermissionGranted) return
         scope.launch {
-            threads = loadThreadsForDrawer()
+            threads = loadThreadsForFolder()
         }
     }
 
@@ -287,7 +268,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
     fun deleteThreadWithUndo(thread: SmsThread) {
         scope.launch {
             commitPendingDelete()
-            val folder = drawerItem.toFolder()
+            val folder = chatFolder.toThreadFolder()
             val snapshot = repository.loadLocalMessageEntities(thread.id)
             pendingDeleteThreadId = thread.id
             threads = ThreadListOptimisticUpdate.applyAction(threads, thread, ThreadBulkAction.Delete)
@@ -314,7 +295,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
         if (!smsPermissionGranted) return
         scope.launch {
             repository.syncTelephonyMessages()
-            threads = loadThreadsForDrawer()
+            threads = loadThreadsForFolder()
         }
     }
 
@@ -323,12 +304,12 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
         scope.launch {
             threadsLoading = threads.isEmpty()
             try {
-                threads = loadThreadsForDrawer()
+                threads = loadThreadsForFolder()
             } finally {
                 threadsLoading = false
             }
             repository.syncTelephonyMessages()
-            threads = loadThreadsForDrawer()
+            threads = loadThreadsForFolder()
             selectedThread?.let { current ->
                 val loadedMessages = repository.loadLocalMessages(current.id)
                 if (selectedThread?.id == current.id) {
@@ -357,15 +338,15 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
         permissionLauncher.launch(requiredPermissions())
     }
 
-    LaunchedEffect(drawerItem, screen) {
-        if (screen == AppScreen.Threads) {
+    LaunchedEffect(chatFolder, screen, selectedTab) {
+        if (screen == AppScreen.Main && selectedTab == MainTab.Chats) {
             refreshThreadsLocal()
             syncThreadsInBackground()
         }
     }
 
     LaunchedEffect(resumeNonce) {
-        if (resumeNonce > 0 && screen == AppScreen.Threads) {
+        if (resumeNonce > 0 && screen == AppScreen.Main && selectedTab == MainTab.Chats) {
             refreshThreadsLocal()
         }
     }
@@ -374,12 +355,12 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
         SmsRefreshEvents.events.collect { event ->
             when (event) {
                 SmsRefreshEvents.RefreshKind.Threads -> {
-                    if (screen == AppScreen.Threads) {
+                    if (screen == AppScreen.Main && selectedTab == MainTab.Chats) {
                         refreshThreadsLocal()
                     }
                 }
                 is SmsRefreshEvents.RefreshKind.ThreadMessages -> {
-                    if (screen == AppScreen.Threads) {
+                    if (screen == AppScreen.Main && selectedTab == MainTab.Chats) {
                         refreshThreadsLocal()
                     }
                     if (selectedThread?.id == event.threadId) {
@@ -391,8 +372,8 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
         }
     }
 
-    LaunchedEffect(screen, contactsPermissionGranted) {
-        if (screen == AppScreen.Contacts) refreshContacts()
+    LaunchedEffect(screen, selectedTab, contactsPermissionGranted) {
+        if (screen == AppScreen.Main && selectedTab == MainTab.Contacts) refreshContacts()
     }
 
     LaunchedEffect(Unit) {
@@ -433,68 +414,109 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
         onThreadConsumed()
     }
 
-    MaterialTheme(colorScheme = colorScheme, typography = KheyrTypography.typography) {
-        ModalNavigationDrawer(
-            drawerState = drawerState,
-            gesturesEnabled = screen == AppScreen.Threads && selectedThread == null,
-            drawerContent = {
-                ModalDrawerSheet {
-                    Text("Kheyr", modifier = Modifier.padding(16.dp), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                    MainDrawerModel.defaultItems().forEach { item ->
-                        NavigationDrawerItem(
-                            label = { Text(item.title) },
-                            selected = drawerItem == item,
-                            onClick = {
-                                drawerOpen = false
-                                scope.launch { drawerState.close() }
-                                drawerItem = item
-                                selectedThread = null
-                                screen = when (item) {
-                                    DrawerItem.Settings -> AppScreen.Settings
-                                    DrawerItem.DesktopSync -> AppScreen.DesktopSync
-                                    DrawerItem.HelpFeedback -> AppScreen.Help
-                                    DrawerItem.Contacts -> AppScreen.Contacts
-                                    else -> AppScreen.Threads
-                                }
-                            },
-                            icon = { Icon(drawerIcon(item), contentDescription = item.title) },
-                            modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding),
-                        )
+    KheyrTheme(themePreference = themePreference) {
+        Scaffold(
+            snackbarHost = { SnackbarHost(snackbarHostState) },
+            topBar = {
+                when (screen) {
+                    AppScreen.Conversation -> Unit
+                    AppScreen.Onboarding -> Unit
+                    else -> {
+                        GlassTopBar {
+                            TopAppBar(
+                                title = {
+                                    Text(
+                                        when (screen) {
+                                            AppScreen.SettingsDetail -> settingsCategory?.name?.replace(Regex("([a-z])([A-Z])"), "$1 $2") ?: "Settings"
+                                            AppScreen.DesktopSync -> "Desktop Sync"
+                                            AppScreen.Help -> "Help & Feedback"
+                                            AppScreen.Main -> when (selectedTab) {
+                                                MainTab.Chats -> chatFolder.title
+                                                MainTab.Contacts -> "Contacts"
+                                                MainTab.Settings -> "Settings"
+                                                MainTab.Profile -> "Profile"
+                                            }
+                                            else -> "Kheyr"
+                                        },
+                                    )
+                                },
+                                navigationIcon = {
+                                    when (screen) {
+                                        AppScreen.SettingsDetail -> IconButton(onClick = { screen = AppScreen.Main }) {
+                                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                                        }
+                                        AppScreen.DesktopSync, AppScreen.Help -> IconButton(onClick = { navigateBack() }) {
+                                            Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+                                        }
+                                        else -> Unit
+                                    }
+                                },
+                                actions = {
+                                    if (screen == AppScreen.Main && selectedTab == MainTab.Chats) {
+                                        Box {
+                                            IconButton(onClick = { chatsOverflowExpanded = true }) {
+                                                Icon(Icons.Default.MoreVert, "Menu")
+                                            }
+                                            DropdownMenu(
+                                                expanded = chatsOverflowExpanded,
+                                                onDismissRequest = { chatsOverflowExpanded = false },
+                                            ) {
+                                                MainNavigationModel.chatFolders().forEach { folder ->
+                                                    DropdownMenuItem(
+                                                        text = { Text(folder.title) },
+                                                        onClick = {
+                                                            chatsOverflowExpanded = false
+                                                            chatFolder = folder
+                                                            refreshThreadsLocal()
+                                                        },
+                                                        leadingIcon = {
+                                                            if (chatFolder == folder) {
+                                                                Icon(Icons.Default.Check, contentDescription = null)
+                                                            }
+                                                        },
+                                                    )
+                                                }
+                                                HorizontalDivider()
+                                                MainNavigationModel.overflowActions().forEach { action ->
+                                                    DropdownMenuItem(
+                                                        text = { Text(action.title) },
+                                                        onClick = {
+                                                            chatsOverflowExpanded = false
+                                                            when (action) {
+                                                                ChatsOverflowAction.DesktopSync -> screen = AppScreen.DesktopSync
+                                                                ChatsOverflowAction.HelpFeedback -> screen = AppScreen.Help
+                                                                ChatsOverflowAction.Compose -> {
+                                                                    selectedTab = MainTab.Contacts
+                                                                    statusMessage = "Select a contact to start a new conversation."
+                                                                }
+                                                            }
+                                                        },
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                },
+                                colors = TopAppBarDefaults.topAppBarColors(
+                                    containerColor = androidx.compose.ui.graphics.Color.Transparent,
+                                ),
+                            )
+                        }
                     }
                 }
             },
-        ) {
-            Scaffold(
-                snackbarHost = { SnackbarHost(snackbarHostState) },
-                topBar = {
-                    when (screen) {
-                        AppScreen.Conversation -> Unit
-                        else -> TopAppBar(
-                            title = {
-                                when (screen) {
-                                    AppScreen.Settings -> Text("Settings")
-                                    AppScreen.DesktopSync -> Text("Desktop Sync")
-                                    AppScreen.Help -> Text("Help & Feedback")
-                                    AppScreen.Contacts -> Text("Contacts")
-                                    else -> Text(drawerItem.title)
-                                }
-                            },
-                            navigationIcon = {
-                                when {
-                                    screen == AppScreen.SettingsDetail -> IconButton(onClick = { screen = AppScreen.Settings }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
-                                    screen in listOf(AppScreen.Settings, AppScreen.DesktopSync, AppScreen.Help, AppScreen.Contacts) -> IconButton(onClick = { navigateBack() }) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
-                                    screen == AppScreen.Threads && selectedThread == null -> IconButton(onClick = { drawerOpen = true }) { Icon(Icons.Default.Menu, "Menu") }
-                                }
-                            },
-                        )
-                    }
-                },
-                floatingActionButton = {
-                    if (screen == AppScreen.Threads && selectedThread == null && drawerItem == DrawerItem.AllMessages) {
-                        FloatingActionButton(onClick = { statusMessage = "New conversation: enter a number from Contacts or reply in an existing thread." }) { Icon(Icons.Default.Edit, "Compose") }
-                    }
-                },
-            ) { padding ->
+            bottomBar = {
+                if (screen == AppScreen.Main) {
+                    KheyrBottomNav(
+                        selectedTab = selectedTab,
+                        onTabSelected = { tab ->
+                            selectedTab = tab
+                            settingsCategory = null
+                        },
+                    )
+                }
+            },
+        ) { padding ->
                 Box(Modifier.padding(padding).fillMaxSize()) {
                     when (screen) {
                         AppScreen.Onboarding -> OnboardingFlow(
@@ -520,9 +542,36 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                             onRequestOtp = {
                                 if (api.requestOtp(otpPhone) || !ApiConfig.isConfigured) statusMessage = "OTP sent (or configure ${ApiConfig.BASE_URL_PLACEHOLDER})" else statusMessage = "Failed to request OTP"
                             },
-                            onFinish = { preferences.onboardingComplete = true; screen = AppScreen.Threads; refreshThreads() },
+                            onFinish = { preferences.onboardingComplete = true; screen = AppScreen.Main; selectedTab = MainTab.Chats; refreshThreads() },
                         )
-                        AppScreen.Threads, AppScreen.Conversation -> {
+                        AppScreen.Main, AppScreen.Conversation -> {
+                            if (screen == AppScreen.Main && selectedTab != MainTab.Chats) {
+                                when (selectedTab) {
+                                    MainTab.Contacts -> ContactsScreen(
+                                        contacts = contacts,
+                                        loading = contactsLoading,
+                                        hasPermission = contactsPermissionGranted,
+                                        searchQuery = contactsSearchQuery,
+                                        onSearchChange = { contactsSearchQuery = it },
+                                        onRequestPermission = { permissionLauncher.launch(requiredPermissions()) },
+                                        onContactClick = { openConversationForContact(it) },
+                                    )
+                                    MainTab.Settings -> SettingsListScreen(
+                                        onCategoryClick = {
+                                            settingsCategory = it
+                                            screen = AppScreen.SettingsDetail
+                                        },
+                                    )
+                                    MainTab.Profile -> ProfileScreen(
+                                        themePreference = themePreference,
+                                        onThemeChange = { themePreference = it; preferences.themePreference = it },
+                                        onHelpClick = { screen = AppScreen.Help },
+                                    )
+                                    MainTab.Chats -> Unit
+                                }
+                            }
+                            val showChatPane = screen == AppScreen.Conversation || (screen == AppScreen.Main && selectedTab == MainTab.Chats)
+                            if (showChatPane) {
                             val inboxPane: InboxPane = if (screen == AppScreen.Conversation && selectedThread != null) {
                                 InboxPane.Chat(selectedThread!!.id)
                             } else {
@@ -550,8 +599,8 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                                                     threadSearchMatcher.matches(searchable, searchQuery)
                                                 }
                                         },
-                                        folder = drawerItem.toFolder(),
-                                        showFilters = drawerItem == DrawerItem.AllMessages,
+                                        folder = chatFolder.toThreadFolder(),
+                                        showFilters = chatFolder == ChatFolder.All,
                                         threadListFilter = threadListFilter,
                                         onThreadListFilterChange = { threadListFilter = it },
                                         searchQuery = searchQuery,
@@ -564,9 +613,9 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                                         emptyText = when {
                                             threadsLoading -> "Loading conversations..."
                                             !smsPermissionGranted -> "Grant SMS access to load conversations"
-                                            drawerItem == DrawerItem.Spam -> "No spam messages"
-                                            drawerItem == DrawerItem.Archived -> "No archived conversations"
-                                            drawerItem == DrawerItem.Pinned -> "No pinned conversations"
+                                            chatFolder == ChatFolder.Spam -> "No spam messages"
+                                            chatFolder == ChatFolder.Archived -> "No archived conversations"
+                                            chatFolder == ChatFolder.Pinned -> "No pinned conversations"
                                             else -> "No conversations yet"
                                         },
                                     )
@@ -586,6 +635,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                                             ConversationScreenContent(
                                                 screen = screenModel,
                                                 sims = sims,
+                                                darkTheme = darkTheme,
                                                 searchActive = conversationSearchActive,
                                                 searchQuery = conversationSearchQuery,
                                                 onSearchQueryChange = { conversationSearchQuery = it },
@@ -633,8 +683,8 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                                     }
                                 }
                             }
+                            }
                         }
-                        AppScreen.Settings -> SettingsListScreen(onCategoryClick = { settingsCategory = it; screen = AppScreen.SettingsDetail })
                         AppScreen.SettingsDetail -> settingsCategory?.let { category ->
                             SettingsDetailScreen(
                                 category = category,
@@ -657,15 +707,6 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                         }
                         AppScreen.DesktopSync -> DesktopSyncScreen(apiBaseUrl = ApiConfig.baseUrl, onRevoke = { statusMessage = "Revoke device via Settings when backend is configured." })
                         AppScreen.Help -> HelpScreen()
-                        AppScreen.Contacts -> ContactsScreen(
-                            contacts = contacts,
-                            loading = contactsLoading,
-                            hasPermission = contactsPermissionGranted,
-                            searchQuery = contactsSearchQuery,
-                            onSearchChange = { contactsSearchQuery = it },
-                            onRequestPermission = { permissionLauncher.launch(requiredPermissions()) },
-                            onContactClick = { openConversationForContact(it) },
-                        )
                     }
                     statusMessage?.let { msg ->
                         Surface(
@@ -681,10 +722,9 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                     }
                 }
             }
-        }
 
         showThreadMenu?.let { thread ->
-            val folder = drawerItem.toFolder()
+            val folder = chatFolder.toThreadFolder()
             ThreadActionDialog(
                 thread = thread,
                 onDismiss = { showThreadMenu = null },
@@ -725,25 +765,6 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
             )
         }
     }
-}
-
-private fun DrawerItem.toFolder(): ThreadFolder = when (this) {
-    DrawerItem.Spam -> ThreadFolder.Spam
-    DrawerItem.Archived -> ThreadFolder.Archived
-    DrawerItem.Pinned -> ThreadFolder.Pinned
-    else -> ThreadFolder.Inbox
-}
-
-@Composable
-private fun drawerIcon(item: DrawerItem) = when (item) {
-    DrawerItem.AllMessages -> Icons.Default.Email
-    DrawerItem.Spam -> Icons.Default.Warning
-    DrawerItem.Archived -> Icons.Default.List
-    DrawerItem.Pinned -> Icons.Default.Star
-    DrawerItem.Contacts -> Icons.Default.Person
-    DrawerItem.DesktopSync -> Icons.Default.Phone
-    DrawerItem.Settings -> Icons.Default.Settings
-    DrawerItem.HelpFeedback -> Icons.Default.Info
 }
 
 @Composable
@@ -828,11 +849,11 @@ private fun ThreadFolderScreen(
     emptyText: String,
 ) {
     Column(Modifier.fillMaxSize()) {
-        SearchTextField(
+        KheyrSearchField(
             value = searchQuery,
             onValueChange = onSearchChange,
             placeholder = "Search threads",
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
         )
         if (showFilters) {
             Row(
@@ -859,36 +880,20 @@ private fun ThreadFolderScreen(
         } else {
             LazyColumn {
                 items(threads, key = { it.id }) { thread ->
-                val row = mapper.map(thread, folder, sims)
-                ListItem(
-                    headlineContent = { Text(row.title, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    supportingContent = { Text(row.preview, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                    trailingContent = {
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text(
-                                formatMessageTime(thread.lastMessageAt),
-                                style = MaterialTheme.typography.labelSmall.copy(textDirection = TextDirection.Rtl),
-                            )
-                            row.unreadBadge?.let { Badge { Text(it) } }
-                        }
-                    },
-                    leadingContent = {
-                        ContactAvatar(
-                            displayName = row.title,
-                            photoUri = thread.contactPhotoUri,
-                        )
-                    },
-                    overlineContent = {
-                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                            if (row.showPinned) Text("📌", style = MaterialTheme.typography.labelSmall)
-                            if (row.showMuted) Text("🔇", style = MaterialTheme.typography.labelSmall)
-                            row.simBadge?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
-                            if (row.showSpamBadge) Text("Spam", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
-                        }
-                    },
-                    modifier = Modifier.fillMaxWidth().combinedClickable(onClick = { onThreadClick(thread) }, onLongClick = { onThreadLongPress(thread) }),
-                )
-                HorizontalDivider()
+                    val row = mapper.map(thread, folder, sims)
+                    TelegramStyleThreadRow(
+                        title = row.title,
+                        preview = row.preview,
+                        timeLabel = formatMessageTime(thread.lastMessageAt),
+                        photoUri = thread.contactPhotoUri,
+                        unreadBadge = row.unreadBadge,
+                        showPinned = row.showPinned,
+                        showMuted = row.showMuted,
+                        simBadge = row.simBadge,
+                        showSpamBadge = row.showSpamBadge,
+                        onClick = { onThreadClick(thread) },
+                        onLongClick = { onThreadLongPress(thread) },
+                    )
                 }
             }
         }
@@ -899,6 +904,7 @@ private fun ThreadFolderScreen(
 private fun ConversationScreenContent(
     screen: ConversationScreenModel,
     sims: List<SimCard>,
+    darkTheme: Boolean,
     searchActive: Boolean,
     searchQuery: String,
     onSearchQueryChange: (String) -> Unit,
@@ -932,26 +938,27 @@ private fun ConversationScreenContent(
 
     Column(Modifier.fillMaxSize()) {
         if (searchActive) {
-            SearchTextField(
+            KheyrSearchField(
                 value = searchQuery,
                 onValueChange = onSearchQueryChange,
                 placeholder = "Search in conversation",
                 modifier = Modifier
-                    .fillMaxWidth()
                     .padding(8.dp)
                     .focusRequester(searchFocusRequester),
+                focusRequester = searchFocusRequester,
             )
         }
         LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxWidth(), contentPadding = PaddingValues(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(visibleMessages, key = { it.id }) { row ->
                 ConversationBubbleRow(
                     row = row,
+                    darkTheme = darkTheme,
                     highlight = if (row.id in matchingIds) highlightQuery else null,
                     onRetry = { onRetry(row.id) },
                 )
             }
         }
-        MessageComposerPanel(body = screen.composer.body, sims = sims, selectedSubscriptionId = screen.composer.selectedSubscriptionId, sending = screen.composer.sending, error = screen.composer.error?.name, onBodyChange = onBodyChange, onSimSelected = onSimSelected, onSend = onSend)
+        TelegramStyleComposer(body = screen.composer.body, sims = sims, selectedSubscriptionId = screen.composer.selectedSubscriptionId, sending = screen.composer.sending, error = screen.composer.error?.name, onBodyChange = onBodyChange, onSimSelected = onSimSelected, onSend = onSend)
     }
 }
 
@@ -964,122 +971,62 @@ private fun ConversationTopBar(
     onSearchToggle: () -> Unit,
     onCall: () -> Unit,
 ) {
-    TopAppBar(
-        title = {
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                ContactAvatar(
-                    displayName = thread.displayName.ifBlank { thread.address },
-                    photoUri = thread.contactPhotoUri,
-                    size = 32.dp,
-                )
-                Column {
-                    Text(thread.displayName.ifBlank { thread.address })
-                    headerSubtitle?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
+    GlassTopBar {
+        TopAppBar(
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ContactAvatar(
+                        displayName = thread.displayName.ifBlank { thread.address },
+                        photoUri = thread.contactPhotoUri,
+                        size = 32.dp,
+                    )
+                    Column {
+                        Text(thread.displayName.ifBlank { thread.address })
+                        headerSubtitle?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
+                    }
                 }
-            }
-        },
-        navigationIcon = {
-            IconButton(onClick = onNavigateBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
-        },
-        actions = {
-            IconButton(onClick = onSearchToggle) { Icon(Icons.Default.Search, "Search") }
-            IconButton(onClick = onCall) { Icon(Icons.Default.Call, "Call") }
-        },
-    )
-}
-
-@Composable
-private fun ConversationBubbleRow(row: ConversationMessageRow, highlight: String?, onRetry: () -> Unit) {
-    val alignment = if (row.layout.alignment == BubbleAlignment.End) Arrangement.End else Arrangement.Start
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = alignment) {
-        if (row.layout.showBubble) {
-            ElevatedCard(colors = CardDefaults.elevatedCardColors(containerColor = if (row.layout.alignment == BubbleAlignment.End) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant)) {
-                MessageBubbleContent(row, highlight, onRetry, false)
-            }
-        } else MessageBubbleContent(row, highlight, onRetry, true)
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun MessageBubbleContent(row: ConversationMessageRow, highlight: String?, onRetry: () -> Unit, emojiStyle: Boolean) {
-    val context = LocalContext.current
-    val clipboard = LocalClipboardManager.current
-    var showCopyMenu by remember { mutableStateOf(false) }
-    val copyableSegments = remember(row.body) { MessageCopyableSegmentDetector.findAll(row.body) }
-    val bubbleModifier = Modifier
-        .padding(12.dp)
-        .widthIn(max = 300.dp)
-        .combinedClickable(onClick = {}, onLongClick = { showCopyMenu = true })
-
-    if (showCopyMenu) {
-        MessageCopyMenuDialog(
-            body = row.body,
-            segments = copyableSegments,
-            onDismiss = { showCopyMenu = false },
-            onCopy = { text ->
-                clipboard.setText(AnnotatedString(text))
-                showCopyMenu = false
             },
-            onCall = { number ->
-                context.startActivity(Intent(Intent.ACTION_DIAL, Uri.parse("tel:$number")))
-                showCopyMenu = false
+            navigationIcon = {
+                IconButton(onClick = onNavigateBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
             },
-            onSms = { number ->
-                context.startActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:$number")))
-                showCopyMenu = false
+            actions = {
+                IconButton(onClick = onSearchToggle) { Icon(Icons.Default.Search, "Search") }
+                IconButton(onClick = onCall) { Icon(Icons.Default.Call, "Call") }
             },
+            colors = TopAppBarDefaults.topAppBarColors(
+                containerColor = androidx.compose.ui.graphics.Color.Transparent,
+            ),
         )
-    }
-
-    Column(bubbleModifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        if (emojiStyle) {
-            Text(
-                row.body,
-                fontSize = 28.sp,
-                textAlign = TextAlign.Center,
-                style = MaterialTheme.typography.bodyLarge.copy(
-                    textDirection = MessageTextDirection.resolve(row.body),
-                ),
-            )
-        } else {
-            HighlightedMessageText(text = row.body, highlight = highlight)
-        }
-        Text(
-            row.timeLabel,
-            style = MaterialTheme.typography.labelSmall.copy(textDirection = TextDirection.Rtl),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        row.copyableCode?.let { code ->
-            TextButton(
-                onClick = { clipboard.setText(AnnotatedString(code)) },
-                contentPadding = PaddingValues(0.dp),
-            ) { Text("کپی کد") }
-        }
-        if (row.showRetry) TextButton(onClick = onRetry, contentPadding = PaddingValues(0.dp)) { Text("Retry") }
-    }
-}
-
-@Composable
-private fun MessageComposerPanel(body: String, sims: List<SimCard>, selectedSubscriptionId: Int?, sending: Boolean, error: String?, onBodyChange: (String) -> Unit, onSimSelected: (Int) -> Unit, onSend: () -> Unit) {
-    Surface(tonalElevation = 3.dp) {
-        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (sims.isNotEmpty()) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { sims.forEach { sim -> FilterChip(selected = selectedSubscriptionId == sim.subscriptionId, onClick = { onSimSelected(sim.subscriptionId) }, label = { Text(sim.displayName) }) } }
-            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(value = body, onValueChange = onBodyChange, modifier = Modifier.weight(1f), placeholder = { Text("Message") }, minLines = 1, maxLines = 5)
-                Button(onClick = onSend, enabled = body.isNotBlank() && !sending) { Text(if (sending) "..." else "Send") }
-            }
-            error?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall) }
-        }
     }
 }
 
 @Composable
 private fun SettingsListScreen(onCategoryClick: (SettingsCategory) -> Unit) {
-    LazyColumn(contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        items(SettingsCategoryOrder.ordered) { category ->
-            ElevatedCard(Modifier.fillMaxWidth().clickable { onCategoryClick(category) }) {
-                ListItem(headlineContent = { Text(category.name.replace(Regex("([a-z])([A-Z])"), "$1 $2")) }, supportingContent = { Text(settingsCategoryDescription(category)) })
+    val grouped = SettingsCategoryOrder.ordered.groupBy { category ->
+        when (category) {
+            SettingsCategory.Notifications, SettingsCategory.UnknownSenders -> "Notifications"
+            SettingsCategory.SpamProtection -> "Privacy"
+            SettingsCategory.DualSim -> "Messaging"
+            SettingsCategory.Sync, SettingsCategory.DesktopDevices -> "Cloud"
+            SettingsCategory.PrivacySecurity -> "Security"
+            SettingsCategory.Appearance, SettingsCategory.About -> "General"
+        }
+    }
+    LazyColumn(
+        contentPadding = PaddingValues(vertical = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        grouped.forEach { (sectionTitle, categories) ->
+            item(key = sectionTitle) {
+                SettingsSection(title = sectionTitle) {
+                    categories.forEach { category ->
+                        SettingsRow(
+                            title = category.name.replace(Regex("([a-z])([A-Z])"), "$1 $2"),
+                            subtitle = settingsCategoryDescription(category),
+                            onClick = { onCategoryClick(category) },
+                        )
+                    }
+                }
             }
         }
     }
@@ -1148,7 +1095,7 @@ private fun SettingsDetailScreen(
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("Enable sync"); Switch(checked = syncEnabled, onCheckedChange = onSyncChange) }
                 Text("API: ${ApiConfig.baseUrl}", style = MaterialTheme.typography.labelSmall)
             }
-            SettingsCategory.DesktopDevices -> Text("Manage paired desktop devices from Desktop Sync in the drawer.")
+            SettingsCategory.DesktopDevices -> Text("Manage paired desktop devices from the Chats overflow menu.")
             SettingsCategory.PrivacySecurity -> {
                 Button(onClick = onDeleteCloudData, modifier = Modifier.fillMaxWidth()) { Text("Delete cloud data") }
                 OutlinedButton(onClick = onExportCloudData, modifier = Modifier.fillMaxWidth()) { Text("Export cloud data") }
@@ -1230,11 +1177,11 @@ private fun ContactsScreen(
         }
         else -> {
             Column(Modifier.fillMaxSize()) {
-                SearchTextField(
+                KheyrSearchField(
                     value = searchQuery,
                     onValueChange = onSearchChange,
                     placeholder = "Search contacts",
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
                 )
                 if (filteredContacts.isEmpty()) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1243,20 +1190,12 @@ private fun ContactsScreen(
                 } else {
                     LazyColumn(contentPadding = PaddingValues(vertical = 8.dp)) {
                         items(filteredContacts, key = { "${it.id}:${it.phoneNumber}" }) { contact ->
-                            ListItem(
-                                headlineContent = { Text(contact.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                                supportingContent = { Text(contact.phoneNumber) },
-                                leadingContent = {
-                                    ContactAvatar(
-                                        displayName = contact.displayName,
-                                        photoUri = contact.photoUri,
-                                    )
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable { onContactClick(contact) },
+                            TelegramStyleContactRow(
+                                displayName = contact.displayName,
+                                phoneNumber = contact.phoneNumber,
+                                photoUri = contact.photoUri,
+                                onClick = { onContactClick(contact) },
                             )
-                            HorizontalDivider()
                         }
                     }
                 }
@@ -1346,29 +1285,4 @@ private fun threadListFilterLabel(filter: ThreadListFilter): String = when (filt
     ThreadListFilter.All -> "All"
     ThreadListFilter.Unread -> "Unread"
     ThreadListFilter.Contacts -> "Contacts"
-}
-
-@Composable
-private fun SearchTextField(
-    value: String,
-    onValueChange: (String) -> Unit,
-    placeholder: String,
-    modifier: Modifier = Modifier,
-    focusRequester: FocusRequester? = null,
-) {
-    OutlinedTextField(
-        value = value,
-        onValueChange = onValueChange,
-        modifier = modifier.then(focusRequester?.let { Modifier.focusRequester(it) } ?: Modifier),
-        placeholder = { Text(placeholder) },
-        singleLine = true,
-        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-        trailingIcon = {
-            if (value.isNotEmpty()) {
-                IconButton(onClick = { onValueChange("") }) {
-                    Icon(Icons.Default.Close, contentDescription = "Clear search")
-                }
-            }
-        },
-    )
 }
