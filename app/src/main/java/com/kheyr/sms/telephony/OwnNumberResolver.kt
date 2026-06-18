@@ -15,7 +15,13 @@ class OwnNumberResolver(private val context: Context) {
             }
         }
         val manager = context.getSystemService(SubscriptionManager::class.java) ?: return false
-        return manager.activeSubscriptionInfoList.orEmpty().any { info ->
+        val activeSubscriptions = try {
+            manager.activeSubscriptionInfoList
+        } catch (_: SecurityException) {
+            // READ_PHONE_STATE / READ_PHONE_NUMBERS may be missing; treat as no match instead of crashing.
+            null
+        }
+        return activeSubscriptions.orEmpty().any { info ->
             val own = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                 info.number
             } else {
