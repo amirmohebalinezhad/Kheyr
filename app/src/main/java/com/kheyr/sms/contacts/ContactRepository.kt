@@ -67,17 +67,16 @@ class ContactRepository(private val context: Context) {
 
     suspend fun lookupProfile(phoneNumber: String): ContactProfile? = withContext(Dispatchers.IO) {
         if (!hasContactsPermission() || phoneNumber.isBlank()) return@withContext null
-        getContactData().profileIndex[phoneNumber]
-            ?: getContactData().profileIndex[PhoneNumberNormalizer.normalize(phoneNumber)]
+        lookupProfileInIndex(getContactData().profileIndex, phoneNumber)
             ?: lookupProfileSync(phoneNumber)
+            ?: lookupProfileSync(PhoneNumberNormalizer.normalize(phoneNumber))
     }
 
     suspend fun enrichThreads(threads: List<SmsThread>): List<SmsThread> = withContext(Dispatchers.IO) {
         if (!hasContactsPermission() || threads.isEmpty()) return@withContext threads
         val data = getContactData()
         threads.map { thread ->
-            val profile = data.profileIndex[thread.address]
-                ?: data.profileIndex[PhoneNumberNormalizer.normalize(thread.address)]
+            val profile = lookupProfileInIndex(data.profileIndex, thread.address)
             if (profile == null && thread.displayName != thread.address && thread.displayName.isNotBlank()) {
                 thread
             } else {
@@ -92,6 +91,11 @@ class ContactRepository(private val context: Context) {
     }
 
     fun matchesAddress(first: String, second: String): Boolean = PhoneNumberNormalizer.matches(first, second)
+
+    internal fun lookupProfileInIndex(profileIndex: Map<String, ContactProfile>, address: String): ContactProfile? =
+        profileIndex[address]
+            ?: profileIndex[PhoneNumberNormalizer.normalize(address)]
+            ?: profileIndex[PhoneNumberNormalizer.matchKey(address)]
 
     private data class CachedContactData(
         val nameIndex: Map<String, String>,
@@ -136,8 +140,10 @@ class ContactRepository(private val context: Context) {
                 )
                 nameIndex.putIfAbsent(number, name)
                 nameIndex.putIfAbsent(PhoneNumberNormalizer.normalize(number), name)
+                nameIndex.putIfAbsent(PhoneNumberNormalizer.matchKey(number), name)
                 profileIndex.putIfAbsent(number, profile)
                 profileIndex.putIfAbsent(PhoneNumberNormalizer.normalize(number), profile)
+                profileIndex.putIfAbsent(PhoneNumberNormalizer.matchKey(number), profile)
             }
         }
         return CachedContactData(nameIndex, profileIndex)

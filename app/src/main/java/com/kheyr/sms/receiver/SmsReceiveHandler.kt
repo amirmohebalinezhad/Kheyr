@@ -1,5 +1,6 @@
 package com.kheyr.sms.receiver
 
+import com.kheyr.sms.data.SmsRefreshEvents
 import com.kheyr.sms.domain.SpamClassification
 import com.kheyr.sms.domain.SpamRuleSet
 import com.kheyr.sms.domain.SpamScorer
@@ -21,6 +22,7 @@ class SmsReceiveHandler(
             IncomingSmsResult.SpamSuppressed
         } else {
             val storedMessage = inboxStore.persistInbox(message)
+            SmsRefreshEvents.notifyThreadChanged(storedMessage.threadId)
             if (shouldNotify(message)) {
                 notifier.show(storedMessage, senderIsContact)
             }

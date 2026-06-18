@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import com.kheyr.sms.data.SmsRefreshEvents
 import com.kheyr.sms.data.SmsRepository
 import com.kheyr.sms.telephony.SmsSender
 
@@ -21,16 +22,19 @@ class SmsSendStatusReceiver : BroadcastReceiver() {
                         if (resultCode == Activity.RESULT_OK) {
                             if (recordSuccessfulPart(context, "sent", messageId, partIndex, partCount)) {
                                 repository.markSent(messageId)
+                                repository.notifyRefreshForTelephonyId(messageId)
                             }
                         } else {
                             clearPartProgress(context, "sent", messageId)
                             clearPartProgress(context, "delivered", messageId)
                             repository.markFailed(messageId)
+                            repository.notifyRefreshForTelephonyId(messageId)
                         }
                     }
                     SmsSender.ACTION_SMS_DELIVERED -> {
                         if (resultCode == Activity.RESULT_OK && recordSuccessfulPart(context, "delivered", messageId, partIndex, partCount)) {
                             repository.markDelivered(messageId)
+                            repository.notifyRefreshForTelephonyId(messageId)
                         }
                     }
                 }

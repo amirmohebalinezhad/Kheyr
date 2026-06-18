@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.RemoteInput
+import com.kheyr.sms.data.SmsRefreshEvents
 import com.kheyr.sms.data.SmsRepository
 import com.kheyr.sms.notifications.IncomingNotificationActions
 import com.kheyr.sms.telephony.SmsSendRequest
@@ -30,13 +31,18 @@ class NotificationActionReceiver : BroadcastReceiver() {
             try {
                 val repository = SmsRepository(appContext)
                 when (action) {
-                    ACTION_MARK_READ -> runBlocking(Dispatchers.IO) { repository.markThreadRead(threadId) }
+                    ACTION_MARK_READ -> runBlocking(Dispatchers.IO) {
+                        repository.markThreadRead(threadId)
+                        SmsRefreshEvents.notifyThreadChanged(threadId)
+                    }
                     ACTION_REPLY -> if (reply != null && recipient.isNotBlank()) {
                         runBlocking(Dispatchers.IO) {
                             val messageId = repository.persistOutgoing(recipient, reply, subscriptionId)
                             repository.markSending(messageId)
+                            repository.syncTelephonyMessagesByIds(listOf(messageId))
                             SmsSender(appContext).send(SmsSendRequest(recipient, reply, subscriptionId, messageId))
                             repository.markThreadRead(threadId)
+                            SmsRefreshEvents.notifyThreadChanged(threadId)
                         }
                     }
                 }
