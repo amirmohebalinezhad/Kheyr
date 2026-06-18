@@ -27,7 +27,12 @@ class SyncWorker(appContext: Context, params: WorkerParameters) : CoroutineWorke
         val encryptor = SmsBodyEncryptor(SecretKeySpec(ByteArray(32) { 1 }, "AES"))
         val uploader = SyncUploader({ syncSettings }, queueStore, api, encryptor)
         uploader.uploadPending()
-        preferences.saveSyncSettings(syncSettings.copy(lastSuccessfulUploadAt = Instant.now()))
+        // Only record success for upload-capable runs. When sync is enabled but the device is not yet
+        // paired, canUpload is false and uploadPending() is a no-op, so recording would make a skipped
+        // run look successful and mask the pending setup state.
+        if (syncSettings.canUpload) {
+            preferences.saveSyncSettings(syncSettings.copy(lastSuccessfulUploadAt = Instant.now()))
+        }
 
         val cursor = preferences.syncCursor()
         api.downloadSyncUpdates(cursor)?.let { response ->
