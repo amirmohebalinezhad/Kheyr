@@ -2,10 +2,12 @@ package com.kheyr.sms.ui
 
 import android.Manifest
 import android.app.role.RoleManager
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import android.provider.Telephony
 import androidx.activity.compose.BackHandler
 import androidx.activity.ComponentActivity
@@ -342,9 +344,26 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
         refreshThreads()
         refreshContacts()
     }
+    fun openAppPermissionSettings() {
+        val settingsIntent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = Uri.fromParts("package", context.packageName, null)
+            if (activity == null) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        try {
+            context.startActivity(settingsIntent)
+            statusMessage = "If the default SMS prompt is unavailable, enable SMS permissions and default app access for Kheyr in Android settings."
+        } catch (_: ActivityNotFoundException) {
+            statusMessage = "Open Android settings manually and enable SMS permissions/default app access for Kheyr."
+        }
+    }
+
     val roleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         isDefaultSms = DefaultSmsRoleChecker.isDefaultSmsApp(context)
-        permissionLauncher.launch(requiredPermissions())
+        if (isDefaultSms) {
+            permissionLauncher.launch(requiredPermissions())
+        } else {
+            openAppPermissionSettings()
+        }
     }
 
     LaunchedEffect(chatFolder, screen, selectedTab) {
@@ -442,10 +461,28 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                             onOtpPhoneChange = { otpPhone = it },
                             onOtpCodeChange = { otpCode = it },
                             onRequestDefault = {
-                                val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                    context.getSystemService(RoleManager::class.java).createRequestRoleIntent(RoleManager.ROLE_SMS)
-                                } else Intent(Telephony.Sms.Intents.ACTION_CHANGE_DEFAULT).putExtra(Telephony.Sms.Intents.EXTRA_PACKAGE_NAME, context.packageName)
-                                roleLauncher.launch(intent)
+                                val roleManager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                    context.getSystemService(RoleManager::class.java)
+                                } else {
+                                    null
+                                }
+                                val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && roleManager?.isRoleAvailable(RoleManager.ROLE_SMS) == true) {
+                                    roleManager.createRequestRoleIntent(RoleManager.ROLE_SMS)
+                                } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                                    Intent(Telephony.Sms.Intents.ACTION_CHANGE_DEFAULT)
+                                        .putExtra(Telephony.Sms.Intents.EXTRA_PACKAGE_NAME, context.packageName)
+                                } else {
+                                    null
+                                }
+                                if (intent == null) {
+                                    openAppPermissionSettings()
+                                } else {
+                                    try {
+                                        roleLauncher.launch(intent)
+                                    } catch (_: ActivityNotFoundException) {
+                                        openAppPermissionSettings()
+                                    }
+                                }
                             },
                             onRequestPermissions = { permissionLauncher.launch(requiredPermissions()) },
                             onSkipSync = { preferences.syncOptInSkipped = true; onboardingStep = 4 },
