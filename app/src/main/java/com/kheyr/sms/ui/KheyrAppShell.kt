@@ -761,7 +761,11 @@ private fun OnboardingFlow(
     val stepInfo = steps.getOrElse(step) { steps.last() }
     val scrollState = rememberScrollState()
 
-    Column(Modifier.fillMaxSize()) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .safeDrawingPadding(),
+    ) {
         Column(
             Modifier
                 .fillMaxWidth()
