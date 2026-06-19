@@ -105,7 +105,6 @@ fun TelegramStyleThreadRow(
                 val metaPrefix = buildString {
                     if (showPinned) append("📌 ")
                     if (showMuted) append("🔇 ")
-                    simBadge?.let { append("$it ") }
                     if (showSpamBadge) append("Spam ")
                 }
                 Text(
