@@ -2,10 +2,12 @@ package com.kheyr.sms.ui
 
 import android.Manifest
 import android.app.role.RoleManager
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 import android.provider.Telephony
 import androidx.activity.compose.BackHandler
 import androidx.activity.ComponentActivity
@@ -26,6 +28,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
@@ -33,6 +36,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -82,7 +86,7 @@ import kotlinx.coroutines.launch
 import com.kheyr.sms.util.JalaliDateFormatter
 import java.time.Instant
 
-enum class AppScreen { Onboarding, Main, Conversation, SettingsDetail, DesktopSync, Help }
+enum class AppScreen { Onboarding, Main, NewMessage, Conversation, SettingsDetail, DesktopSync, Help }
 
 private sealed interface InboxPane {
     data object List : InboxPane
@@ -116,6 +120,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
     var contacts by remember { mutableStateOf<List<DeviceContact>>(emptyList()) }
     var contactsLoading by remember { mutableStateOf(false) }
     var contactsSearchQuery by remember { mutableStateOf("") }
+    var newMessageQuery by remember { mutableStateOf("") }
     var selectedThread by remember { mutableStateOf<SmsThread?>(null) }
     var messages by remember { mutableStateOf<List<SmsMessage>>(emptyList()) }
     var composerState by remember { mutableStateOf(SmsComposerState()) }
@@ -125,6 +130,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
     var conversationSearchActive by remember { mutableStateOf(false) }
     var showThreadMenu by remember { mutableStateOf<SmsThread?>(null) }
     var chatsOverflowExpanded by remember { mutableStateOf(false) }
+    var threadSelectionOverflowExpanded by remember { mutableStateOf(false) }
     var isDefaultSms by remember { mutableStateOf(DefaultSmsRoleChecker.isDefaultSmsApp(context)) }
     var smsPermissionGranted by remember {
         mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED)
@@ -161,6 +167,9 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
     val snackbarHostState = remember { SnackbarHostState() }
     var inboxNavForward by remember { mutableStateOf(true) }
     var pendingDeleteThreadId by remember { mutableStateOf<Long?>(null) }
+    var threadSelection by remember { mutableStateOf(ThreadSelectionState()) }
+    val threadListState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
+    val contactsListState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
 
     val darkTheme = isKheyrDarkTheme(themePreference)
 
@@ -173,6 +182,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
     )
 
     fun openConversation(thread: SmsThread) {
+        threadSelection = threadSelection.clear()
         inboxNavForward = true
         selectedThread = thread
         messages = emptyList()
@@ -186,20 +196,24 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
         }
     }
 
-    fun openConversationForContact(contact: DeviceContact) {
-        val existing = threads.firstOrNull { contactRepository.matchesAddress(it.address, contact.phoneNumber) }
-        val threadId = existing?.id ?: Telephony.Threads.getOrCreateThreadId(context, setOf(contact.phoneNumber))
+    fun openConversationForRecipient(recipient: NewMessageRecipient) {
+        val existing = threads.firstOrNull { contactRepository.matchesAddress(it.address, recipient.address) }
+        val threadId = existing?.id ?: Telephony.Threads.getOrCreateThreadId(context, setOf(recipient.address))
         openConversation(
-            existing?.copy(displayName = contact.displayName, contactPhotoUri = contact.photoUri)
+            existing?.copy(displayName = recipient.displayName.ifBlank { existing.displayName }, contactPhotoUri = recipient.photoUri ?: existing.contactPhotoUri)
                 ?: SmsThread(
                     id = threadId,
-                    address = contact.phoneNumber,
-                    displayName = contact.displayName,
+                    address = recipient.address,
+                    displayName = recipient.displayName.ifBlank { recipient.address },
                     lastMessage = "",
                     lastMessageAt = Instant.now(),
-                    contactPhotoUri = contact.photoUri,
+                    contactPhotoUri = recipient.photoUri,
                 ),
         )
+    }
+
+    fun openConversationForContact(contact: DeviceContact) {
+        openConversationForRecipient(NewMessageViewModel().recipientFor(contact))
     }
 
     fun navigateBack() {
@@ -214,6 +228,11 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                     conversationSearchQuery = ""
                 }
             }
+            screen == AppScreen.NewMessage -> {
+                screen = AppScreen.Main
+                selectedTab = MainTab.Chats
+                newMessageQuery = ""
+            }
             screen == AppScreen.SettingsDetail -> {
                 screen = AppScreen.Main
                 selectedTab = MainTab.Settings
@@ -225,13 +244,16 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
         }
     }
 
-    val handleSystemBack = screen != AppScreen.Onboarding && (
+    val handleSystemBack = threadSelection.isSelectionMode || (screen != AppScreen.Onboarding && (
         screen == AppScreen.Conversation ||
+            screen == AppScreen.NewMessage ||
             screen == AppScreen.SettingsDetail ||
             screen in listOf(AppScreen.DesktopSync, AppScreen.Help)
-        )
+        ))
 
-    BackHandler(enabled = handleSystemBack) { navigateBack() }
+    BackHandler(enabled = handleSystemBack) {
+        if (threadSelection.isSelectionMode) threadSelection = threadSelection.clear() else navigateBack()
+    }
 
     fun hasPermission(permission: String) = ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
     fun gateState() = OnboardingGateState(isDefaultSms, smsPermissionGranted, contactsPermissionGranted, hasPermission(Manifest.permission.POST_NOTIFICATIONS) || Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU)
@@ -300,6 +322,48 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
         }
     }
 
+
+    fun selectedThreadsForAction(): List<SmsThread> = threads.filter { it.id in threadSelection.selectedThreadIds }
+
+    fun runThreadSelectionAction(action: ThreadBulkAction) {
+        val request = threadSelection.request(action)
+        if (!request.isRunnable) return
+        val selectedThreads = selectedThreadsForAction()
+        val folder = chatFolder.toThreadFolder()
+        threads = selectedThreads.fold(threads) { current, thread ->
+            ThreadListOptimisticUpdate.applyAction(current, thread, action)
+        }
+        threads = ThreadListOptimisticUpdate.filterForFolder(threads, folder)
+        threadSelection = threadSelection.clear()
+        scope.launch {
+            selectedThreads.forEach { thread ->
+                when (action) {
+                    ThreadBulkAction.MarkRead -> repository.markThreadRead(thread.id)
+                    ThreadBulkAction.Archive -> repository.updateArchived(thread.id, !thread.isArchived)
+                    ThreadBulkAction.MarkSpam -> repository.updateSpam(thread.id, !thread.isSpam)
+                    ThreadBulkAction.Mute -> repository.updateMuted(thread.id, !thread.isMuted)
+                    ThreadBulkAction.Delete -> repository.deleteThreadMessages(thread.id)
+                }
+            }
+            refreshThreadsLocal()
+        }
+    }
+
+    fun runThreadSelectionPin(pinned: Boolean) {
+        val selectedThreads = selectedThreadsForAction()
+        if (selectedThreads.isEmpty()) return
+        val folder = chatFolder.toThreadFolder()
+        threads = selectedThreads.fold(threads) { current, thread ->
+            ThreadListOptimisticUpdate.applyPin(current, thread, pinned)
+        }
+        threads = ThreadListOptimisticUpdate.filterForFolder(threads, folder)
+        threadSelection = threadSelection.clear()
+        scope.launch {
+            selectedThreads.forEach { thread -> repository.updatePinned(thread.id, pinned) }
+            refreshThreadsLocal()
+        }
+    }
+
     fun syncThreadsInBackground() {
         if (!smsPermissionGranted) return
         scope.launch {
@@ -342,9 +406,26 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
         refreshThreads()
         refreshContacts()
     }
+    fun openAppPermissionSettings() {
+        val settingsIntent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = Uri.fromParts("package", context.packageName, null)
+            if (activity == null) addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        try {
+            context.startActivity(settingsIntent)
+            statusMessage = "If the default SMS prompt is unavailable, enable SMS permissions and default app access for Kheyr in Android settings."
+        } catch (_: ActivityNotFoundException) {
+            statusMessage = "Open Android settings manually and enable SMS permissions/default app access for Kheyr."
+        }
+    }
+
     val roleLauncher = rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         isDefaultSms = DefaultSmsRoleChecker.isDefaultSmsApp(context)
-        permissionLauncher.launch(requiredPermissions())
+        if (isDefaultSms) {
+            permissionLauncher.launch(requiredPermissions())
+        } else {
+            openAppPermissionSettings()
+        }
     }
 
     LaunchedEffect(chatFolder, screen, selectedTab) {
@@ -423,7 +504,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
         onThreadConsumed()
     }
 
-    val showShellTopBar = screen != AppScreen.Onboarding && screen != AppScreen.Conversation
+    val showShellTopBar = screen != AppScreen.Onboarding && screen != AppScreen.Conversation && screen != AppScreen.NewMessage
 
     KheyrTheme(themePreference = themePreference) {
         Scaffold(
@@ -442,10 +523,28 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                             onOtpPhoneChange = { otpPhone = it },
                             onOtpCodeChange = { otpCode = it },
                             onRequestDefault = {
-                                val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                    context.getSystemService(RoleManager::class.java).createRequestRoleIntent(RoleManager.ROLE_SMS)
-                                } else Intent(Telephony.Sms.Intents.ACTION_CHANGE_DEFAULT).putExtra(Telephony.Sms.Intents.EXTRA_PACKAGE_NAME, context.packageName)
-                                roleLauncher.launch(intent)
+                                val roleManager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                    context.getSystemService(RoleManager::class.java)
+                                } else {
+                                    null
+                                }
+                                val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && roleManager?.isRoleAvailable(RoleManager.ROLE_SMS) == true) {
+                                    roleManager.createRequestRoleIntent(RoleManager.ROLE_SMS)
+                                } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                                    Intent(Telephony.Sms.Intents.ACTION_CHANGE_DEFAULT)
+                                        .putExtra(Telephony.Sms.Intents.EXTRA_PACKAGE_NAME, context.packageName)
+                                } else {
+                                    null
+                                }
+                                if (intent == null) {
+                                    openAppPermissionSettings()
+                                } else {
+                                    try {
+                                        roleLauncher.launch(intent)
+                                    } catch (_: ActivityNotFoundException) {
+                                        openAppPermissionSettings()
+                                    }
+                                }
                             },
                             onRequestPermissions = { permissionLauncher.launch(requiredPermissions()) },
                             onSkipSync = { preferences.syncOptInSkipped = true; onboardingStep = 4 },
@@ -458,8 +557,19 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                             },
                             onFinish = { preferences.onboardingComplete = true; screen = AppScreen.Main; selectedTab = MainTab.Chats; refreshThreads() },
                         )
-                        AppScreen.Main, AppScreen.Conversation -> {
-                            if (screen == AppScreen.Main && selectedTab != MainTab.Chats) {
+                        AppScreen.Main, AppScreen.NewMessage, AppScreen.Conversation -> {
+                            if (screen == AppScreen.NewMessage) {
+                                NewMessageScreen(
+                                    contacts = contacts,
+                                    loading = contactsLoading,
+                                    hasPermission = contactsPermissionGranted,
+                                    query = newMessageQuery,
+                                    onQueryChange = { newMessageQuery = it },
+                                    onRequestPermission = { permissionLauncher.launch(requiredPermissions()) },
+                                    onRecipientSelected = { openConversationForRecipient(it) },
+                                    onNavigateBack = { navigateBack() },
+                                )
+                            } else if (screen == AppScreen.Main && selectedTab != MainTab.Chats) {
                                 when (selectedTab) {
                                     MainTab.Contacts -> ContactsScreen(
                                         contacts = contacts,
@@ -469,6 +579,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                                         onSearchChange = { contactsSearchQuery = it },
                                         onRequestPermission = { permissionLauncher.launch(requiredPermissions()) },
                                         onContactClick = { openConversationForContact(it) },
+                                        listState = contactsListState,
                                     )
                                     MainTab.Settings -> SettingsListScreen(
                                         onCategoryClick = {
@@ -522,8 +633,14 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                                         sims = sims,
                                         mapper = threadRowMapper,
                                         loading = threadsLoading,
+                                        selectedThreadIds = threadSelection.selectedThreadIds,
+                                        onThreadClick = { thread ->
+                                            if (threadSelection.isSelectionMode) threadSelection = threadSelection.toggle(thread.id) else openConversation(thread)
+                                        },
+                                        onThreadLongPress = { thread -> threadSelection = threadSelection.select(thread.id) },
                                         onThreadClick = { openConversation(it) },
                                         onThreadLongPress = { showThreadMenu = it },
+                                        listState = threadListState,
                                         emptyText = when {
                                             threadsLoading -> "Loading conversations..."
                                             !smsPermissionGranted -> "Grant SMS access to load conversations"
@@ -624,11 +741,17 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                             selectedTab = selectedTab,
                             chatFolder = chatFolder,
                             settingsCategory = settingsCategory,
+                            selectedCount = if (screen == AppScreen.Main && selectedTab == MainTab.Chats) threadSelection.selectedThreadIds.size else 0,
+                            selectionPinLabel = if (selectedThreadsForAction().all { it.isPinned }) "Unpin" else "Pin",
                             chatsOverflowExpanded = chatsOverflowExpanded,
+                            selectionOverflowExpanded = threadSelectionOverflowExpanded,
                             onChatsOverflowDismiss = { chatsOverflowExpanded = false },
                             onChatsOverflowExpand = { chatsOverflowExpanded = true },
+                            onSelectionOverflowDismiss = { threadSelectionOverflowExpanded = false },
+                            onSelectionOverflowExpand = { threadSelectionOverflowExpanded = true },
                             onChatFolderSelected = { folder ->
                                 chatFolder = folder
+                                threadSelection = threadSelection.clear()
                                 refreshThreadsLocal()
                             },
                             onOverflowAction = { action ->
@@ -636,13 +759,17 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                                     ChatsOverflowAction.DesktopSync -> screen = AppScreen.DesktopSync
                                     ChatsOverflowAction.HelpFeedback -> screen = AppScreen.Help
                                     ChatsOverflowAction.Compose -> {
-                                        selectedTab = MainTab.Contacts
-                                        statusMessage = "Select a contact to start a new conversation."
+                                        newMessageQuery = ""
+                                        screen = AppScreen.NewMessage
+                                        refreshContacts()
                                     }
                                 }
                             },
                             onNavigateBack = { navigateBack() },
                             onSettingsBack = { screen = AppScreen.Main },
+                            onSelectionClose = { threadSelection = threadSelection.clear() },
+                            onSelectionAction = { threadSelectionOverflowExpanded = false; runThreadSelectionAction(it) },
+                            onSelectionPin = { pinned -> threadSelectionOverflowExpanded = false; runThreadSelectionPin(pinned) },
                         )
                     }
                 }
@@ -761,7 +888,11 @@ private fun OnboardingFlow(
     val stepInfo = steps.getOrElse(step) { steps.last() }
     val scrollState = rememberScrollState()
 
-    Column(Modifier.fillMaxSize()) {
+    Column(
+        Modifier
+            .fillMaxSize()
+            .safeDrawingPadding(),
+    ) {
         Column(
             Modifier
                 .fillMaxWidth()
@@ -1009,8 +1140,10 @@ private fun ThreadFolderScreen(
     sims: List<SimCard>,
     mapper: ThreadRowPresentationMapper,
     loading: Boolean,
+    selectedThreadIds: Set<Long>,
     onThreadClick: (SmsThread) -> Unit,
     onThreadLongPress: (SmsThread) -> Unit,
+    listState: LazyListState,
     emptyText: String,
 ) {
     val topInset = KheyrChromeInsets.shellTop()
@@ -1048,6 +1181,7 @@ private fun ThreadFolderScreen(
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { Text(emptyText) }
         } else {
             LazyColumn(
+                state = listState,
                 modifier = Modifier.weight(1f),
                 contentPadding = PaddingValues(bottom = bottomInset),
             ) {
@@ -1065,6 +1199,7 @@ private fun ThreadFolderScreen(
                         showSpamBadge = row.showSpamBadge,
                         onClick = { onThreadClick(thread) },
                         onLongClick = { onThreadLongPress(thread) },
+                        selected = thread.id in selectedThreadIds,
                     )
                 }
             }
@@ -1332,6 +1467,73 @@ private fun HelpScreen() {
     }
 }
 
+
+@Composable
+private fun NewMessageScreen(
+    contacts: List<DeviceContact>,
+    loading: Boolean,
+    hasPermission: Boolean,
+    query: String,
+    onQueryChange: (String) -> Unit,
+    onRequestPermission: () -> Unit,
+    onRecipientSelected: (NewMessageRecipient) -> Unit,
+    onNavigateBack: () -> Unit,
+) {
+    val topInset = KheyrChromeInsets.shellTop()
+    val model = remember(contacts) { NewMessageViewModel(contacts) }
+    val state = remember(model, query) { model.stateFor(query) }
+
+    Column(Modifier.fillMaxSize().padding(top = topInset)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onNavigateBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+            Text("New message", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+        }
+        KheyrSearchField(
+            value = query,
+            onValueChange = onQueryChange,
+            placeholder = "Name or phone number",
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+        )
+        if (!hasPermission) {
+            Text(
+                "Grant contacts access to search your address book, or type a phone number to continue.",
+                modifier = Modifier.padding(horizontal = 16.dp),
+                style = MaterialTheme.typography.bodyMedium,
+            )
+            TextButton(onClick = onRequestPermission, modifier = Modifier.padding(horizontal = 8.dp)) { Text("Grant contacts access") }
+        }
+        state.manualAddress?.let { address ->
+            ListItem(
+                headlineContent = { Text("Send to $address") },
+                supportingContent = { Text("Use typed phone number") },
+                leadingContent = { Icon(Icons.Default.Send, contentDescription = null) },
+                modifier = Modifier.clickable { model.manualRecipient(query)?.let(onRecipientSelected) },
+            )
+        }
+        if (loading && contacts.isEmpty()) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        } else if (state.matches.isEmpty()) {
+            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
+                Text(if (query.isBlank()) "Type a name or phone number" else "No matching contacts")
+            }
+        } else {
+            LazyColumn(modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = KheyrChromeInsets.bottomNav())) {
+                items(state.matches, key = { "${it.id}:${it.phoneNumber}" }) { contact ->
+                    TelegramStyleContactRow(
+                        displayName = contact.displayName,
+                        phoneNumber = contact.phoneNumber,
+                        photoUri = contact.photoUri,
+                        onClick = { onRecipientSelected(model.recipientFor(contact)) },
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun ContactsScreen(
     contacts: List<DeviceContact>,
@@ -1341,6 +1543,7 @@ private fun ContactsScreen(
     onSearchChange: (String) -> Unit,
     onRequestPermission: () -> Unit,
     onContactClick: (DeviceContact) -> Unit,
+    listState: LazyListState,
 ) {
     val topInset = KheyrChromeInsets.shellTop()
     val bottomInset = KheyrChromeInsets.bottomNav()
@@ -1393,6 +1596,7 @@ private fun ContactsScreen(
                     }
                 } else {
                     LazyColumn(
+                        state = listState,
                         modifier = Modifier.weight(1f),
                         contentPadding = PaddingValues(bottom = bottomInset),
                     ) {
@@ -1501,17 +1705,27 @@ private fun ShellTopAppBar(
     selectedTab: MainTab,
     chatFolder: ChatFolder,
     settingsCategory: SettingsCategory?,
+    selectedCount: Int,
+    selectionPinLabel: String,
     chatsOverflowExpanded: Boolean,
+    selectionOverflowExpanded: Boolean,
     onChatsOverflowDismiss: () -> Unit,
     onChatsOverflowExpand: () -> Unit,
+    onSelectionOverflowDismiss: () -> Unit,
+    onSelectionOverflowExpand: () -> Unit,
     onChatFolderSelected: (ChatFolder) -> Unit,
     onOverflowAction: (ChatsOverflowAction) -> Unit,
     onNavigateBack: () -> Unit,
     onSettingsBack: () -> Unit,
+    onSelectionClose: () -> Unit,
+    onSelectionAction: (ThreadBulkAction) -> Unit,
+    onSelectionPin: (Boolean) -> Unit,
 ) {
     TopAppBar(
         title = {
-            Text(
+            if (selectedCount > 0) {
+                Text("$selectedCount selected")
+            } else Text(
                 when (screen) {
                     AppScreen.SettingsDetail -> settingsCategory?.name?.replace(Regex("([a-z])([A-Z])"), "$1 $2") ?: "Settings"
                     AppScreen.DesktopSync -> "Desktop Sync"
@@ -1534,11 +1748,23 @@ private fun ShellTopAppBar(
                 AppScreen.DesktopSync, AppScreen.Help -> IconButton(onClick = onNavigateBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
                 }
-                else -> Unit
+                else -> if (selectedCount > 0) IconButton(onClick = onSelectionClose) { Icon(Icons.Default.Close, "Clear selection") }
             }
         },
         actions = {
-            if (screen == AppScreen.Main && selectedTab == MainTab.Chats) {
+            if (selectedCount > 0) {
+                IconButton(onClick = { onSelectionAction(ThreadBulkAction.MarkSpam) }) { Icon(Icons.Default.Warning, "Mark spam") }
+                IconButton(onClick = { onSelectionAction(ThreadBulkAction.Archive) }) { Icon(Icons.Default.List, "Archive") }
+                IconButton(onClick = { onSelectionAction(ThreadBulkAction.Delete) }) { Icon(Icons.Default.Delete, "Delete") }
+                Box {
+                    IconButton(onClick = onSelectionOverflowExpand) { Icon(Icons.Default.MoreVert, "More selection actions") }
+                    DropdownMenu(expanded = selectionOverflowExpanded, onDismissRequest = onSelectionOverflowDismiss) {
+                        DropdownMenuItem(text = { Text(selectionPinLabel) }, onClick = { onSelectionPin(selectionPinLabel == "Pin") })
+                        DropdownMenuItem(text = { Text("Mark read") }, onClick = { onSelectionAction(ThreadBulkAction.MarkRead) })
+                        DropdownMenuItem(text = { Text("Mute") }, onClick = { onSelectionAction(ThreadBulkAction.Mute) })
+                    }
+                }
+            } else if (screen == AppScreen.Main && selectedTab == MainTab.Chats) {
                 Box {
                     IconButton(onClick = onChatsOverflowExpand) {
                         Icon(Icons.Default.MoreVert, "Menu")
