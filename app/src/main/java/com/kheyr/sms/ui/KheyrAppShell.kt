@@ -306,11 +306,12 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
     }
 
 
+    fun selectedThreadsForAction(): List<SmsThread> = threads.filter { it.id in threadSelection.selectedThreadIds }
+
     fun runThreadSelectionAction(action: ThreadBulkAction) {
         val request = threadSelection.request(action)
         if (!request.isRunnable) return
-        val selectedIds = request.threadIds
-        val selectedThreads = threads.filter { it.id in selectedIds }
+        val selectedThreads = selectedThreadsForAction()
         val folder = chatFolder.toThreadFolder()
         threads = selectedThreads.fold(threads) { current, thread ->
             ThreadListOptimisticUpdate.applyAction(current, thread, action)
@@ -327,6 +328,21 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                     ThreadBulkAction.Delete -> repository.deleteThreadMessages(thread.id)
                 }
             }
+            refreshThreadsLocal()
+        }
+    }
+
+    fun runThreadSelectionPin(pinned: Boolean) {
+        val selectedThreads = selectedThreadsForAction()
+        if (selectedThreads.isEmpty()) return
+        val folder = chatFolder.toThreadFolder()
+        threads = selectedThreads.fold(threads) { current, thread ->
+            ThreadListOptimisticUpdate.applyPin(current, thread, pinned)
+        }
+        threads = ThreadListOptimisticUpdate.filterForFolder(threads, folder)
+        threadSelection = threadSelection.clear()
+        scope.launch {
+            selectedThreads.forEach { thread -> repository.updatePinned(thread.id, pinned) }
             refreshThreadsLocal()
         }
     }
@@ -659,6 +675,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                             chatFolder = chatFolder,
                             settingsCategory = settingsCategory,
                             selectedCount = if (screen == AppScreen.Main && selectedTab == MainTab.Chats) threadSelection.selectedThreadIds.size else 0,
+                            selectionPinLabel = if (selectedThreadsForAction().all { it.isPinned }) "Unpin" else "Pin",
                             chatsOverflowExpanded = chatsOverflowExpanded,
                             selectionOverflowExpanded = threadSelectionOverflowExpanded,
                             onChatsOverflowDismiss = { chatsOverflowExpanded = false },
@@ -684,6 +701,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                             onSettingsBack = { screen = AppScreen.Main },
                             onSelectionClose = { threadSelection = threadSelection.clear() },
                             onSelectionAction = { threadSelectionOverflowExpanded = false; runThreadSelectionAction(it) },
+                            onSelectionPin = { pinned -> threadSelectionOverflowExpanded = false; runThreadSelectionPin(pinned) },
                         )
                     }
                 }
@@ -1545,6 +1563,7 @@ private fun ShellTopAppBar(
     chatFolder: ChatFolder,
     settingsCategory: SettingsCategory?,
     selectedCount: Int,
+    selectionPinLabel: String,
     chatsOverflowExpanded: Boolean,
     selectionOverflowExpanded: Boolean,
     onChatsOverflowDismiss: () -> Unit,
@@ -1557,6 +1576,7 @@ private fun ShellTopAppBar(
     onSettingsBack: () -> Unit,
     onSelectionClose: () -> Unit,
     onSelectionAction: (ThreadBulkAction) -> Unit,
+    onSelectionPin: (Boolean) -> Unit,
 ) {
     TopAppBar(
         title = {
@@ -1596,6 +1616,7 @@ private fun ShellTopAppBar(
                 Box {
                     IconButton(onClick = onSelectionOverflowExpand) { Icon(Icons.Default.MoreVert, "More selection actions") }
                     DropdownMenu(expanded = selectionOverflowExpanded, onDismissRequest = onSelectionOverflowDismiss) {
+                        DropdownMenuItem(text = { Text(selectionPinLabel) }, onClick = { onSelectionPin(selectionPinLabel == "Pin") })
                         DropdownMenuItem(text = { Text("Mark read") }, onClick = { onSelectionAction(ThreadBulkAction.MarkRead) })
                         DropdownMenuItem(text = { Text("Mute") }, onClick = { onSelectionAction(ThreadBulkAction.Mute) })
                     }
