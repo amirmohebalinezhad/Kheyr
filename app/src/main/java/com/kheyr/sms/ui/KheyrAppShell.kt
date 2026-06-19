@@ -130,6 +130,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
     var conversationSearchActive by remember { mutableStateOf(false) }
     var showThreadMenu by remember { mutableStateOf<SmsThread?>(null) }
     var chatsOverflowExpanded by remember { mutableStateOf(false) }
+    var threadSelectionOverflowExpanded by remember { mutableStateOf(false) }
     var isDefaultSms by remember { mutableStateOf(DefaultSmsRoleChecker.isDefaultSmsApp(context)) }
     var smsPermissionGranted by remember {
         mutableStateOf(ContextCompat.checkSelfPermission(context, Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED)
@@ -166,6 +167,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
     val snackbarHostState = remember { SnackbarHostState() }
     var inboxNavForward by remember { mutableStateOf(true) }
     var pendingDeleteThreadId by remember { mutableStateOf<Long?>(null) }
+    var threadSelection by remember { mutableStateOf(ThreadSelectionState()) }
     val threadListState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
     val contactsListState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
 
@@ -180,6 +182,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
     )
 
     fun openConversation(thread: SmsThread) {
+        threadSelection = threadSelection.clear()
         inboxNavForward = true
         selectedThread = thread
         messages = emptyList()
@@ -241,14 +244,16 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
         }
     }
 
-    val handleSystemBack = screen != AppScreen.Onboarding && (
+    val handleSystemBack = threadSelection.isSelectionMode || (screen != AppScreen.Onboarding && (
         screen == AppScreen.Conversation ||
             screen == AppScreen.NewMessage ||
             screen == AppScreen.SettingsDetail ||
             screen in listOf(AppScreen.DesktopSync, AppScreen.Help)
-        )
+        ))
 
-    BackHandler(enabled = handleSystemBack) { navigateBack() }
+    BackHandler(enabled = handleSystemBack) {
+        if (threadSelection.isSelectionMode) threadSelection = threadSelection.clear() else navigateBack()
+    }
 
     fun hasPermission(permission: String) = ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED
     fun gateState() = OnboardingGateState(isDefaultSms, smsPermissionGranted, contactsPermissionGranted, hasPermission(Manifest.permission.POST_NOTIFICATIONS) || Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU)
@@ -314,6 +319,48 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
             } else if (pendingDeleteThreadId == thread.id) {
                 commitPendingDelete()
             }
+        }
+    }
+
+
+    fun selectedThreadsForAction(): List<SmsThread> = threads.filter { it.id in threadSelection.selectedThreadIds }
+
+    fun runThreadSelectionAction(action: ThreadBulkAction) {
+        val request = threadSelection.request(action)
+        if (!request.isRunnable) return
+        val selectedThreads = selectedThreadsForAction()
+        val folder = chatFolder.toThreadFolder()
+        threads = selectedThreads.fold(threads) { current, thread ->
+            ThreadListOptimisticUpdate.applyAction(current, thread, action)
+        }
+        threads = ThreadListOptimisticUpdate.filterForFolder(threads, folder)
+        threadSelection = threadSelection.clear()
+        scope.launch {
+            selectedThreads.forEach { thread ->
+                when (action) {
+                    ThreadBulkAction.MarkRead -> repository.markThreadRead(thread.id)
+                    ThreadBulkAction.Archive -> repository.updateArchived(thread.id, !thread.isArchived)
+                    ThreadBulkAction.MarkSpam -> repository.updateSpam(thread.id, !thread.isSpam)
+                    ThreadBulkAction.Mute -> repository.updateMuted(thread.id, !thread.isMuted)
+                    ThreadBulkAction.Delete -> repository.deleteThreadMessages(thread.id)
+                }
+            }
+            refreshThreadsLocal()
+        }
+    }
+
+    fun runThreadSelectionPin(pinned: Boolean) {
+        val selectedThreads = selectedThreadsForAction()
+        if (selectedThreads.isEmpty()) return
+        val folder = chatFolder.toThreadFolder()
+        threads = selectedThreads.fold(threads) { current, thread ->
+            ThreadListOptimisticUpdate.applyPin(current, thread, pinned)
+        }
+        threads = ThreadListOptimisticUpdate.filterForFolder(threads, folder)
+        threadSelection = threadSelection.clear()
+        scope.launch {
+            selectedThreads.forEach { thread -> repository.updatePinned(thread.id, pinned) }
+            refreshThreadsLocal()
         }
     }
 
@@ -586,6 +633,11 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                                         sims = sims,
                                         mapper = threadRowMapper,
                                         loading = threadsLoading,
+                                        selectedThreadIds = threadSelection.selectedThreadIds,
+                                        onThreadClick = { thread ->
+                                            if (threadSelection.isSelectionMode) threadSelection = threadSelection.toggle(thread.id) else openConversation(thread)
+                                        },
+                                        onThreadLongPress = { thread -> threadSelection = threadSelection.select(thread.id) },
                                         onThreadClick = { openConversation(it) },
                                         onThreadLongPress = { showThreadMenu = it },
                                         listState = threadListState,
@@ -689,11 +741,17 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                             selectedTab = selectedTab,
                             chatFolder = chatFolder,
                             settingsCategory = settingsCategory,
+                            selectedCount = if (screen == AppScreen.Main && selectedTab == MainTab.Chats) threadSelection.selectedThreadIds.size else 0,
+                            selectionPinLabel = if (selectedThreadsForAction().all { it.isPinned }) "Unpin" else "Pin",
                             chatsOverflowExpanded = chatsOverflowExpanded,
+                            selectionOverflowExpanded = threadSelectionOverflowExpanded,
                             onChatsOverflowDismiss = { chatsOverflowExpanded = false },
                             onChatsOverflowExpand = { chatsOverflowExpanded = true },
+                            onSelectionOverflowDismiss = { threadSelectionOverflowExpanded = false },
+                            onSelectionOverflowExpand = { threadSelectionOverflowExpanded = true },
                             onChatFolderSelected = { folder ->
                                 chatFolder = folder
+                                threadSelection = threadSelection.clear()
                                 refreshThreadsLocal()
                             },
                             onOverflowAction = { action ->
@@ -709,6 +767,9 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                             },
                             onNavigateBack = { navigateBack() },
                             onSettingsBack = { screen = AppScreen.Main },
+                            onSelectionClose = { threadSelection = threadSelection.clear() },
+                            onSelectionAction = { threadSelectionOverflowExpanded = false; runThreadSelectionAction(it) },
+                            onSelectionPin = { pinned -> threadSelectionOverflowExpanded = false; runThreadSelectionPin(pinned) },
                         )
                     }
                 }
@@ -1079,6 +1140,7 @@ private fun ThreadFolderScreen(
     sims: List<SimCard>,
     mapper: ThreadRowPresentationMapper,
     loading: Boolean,
+    selectedThreadIds: Set<Long>,
     onThreadClick: (SmsThread) -> Unit,
     onThreadLongPress: (SmsThread) -> Unit,
     listState: LazyListState,
@@ -1137,6 +1199,7 @@ private fun ThreadFolderScreen(
                         showSpamBadge = row.showSpamBadge,
                         onClick = { onThreadClick(thread) },
                         onLongClick = { onThreadLongPress(thread) },
+                        selected = thread.id in selectedThreadIds,
                     )
                 }
             }
@@ -1642,17 +1705,27 @@ private fun ShellTopAppBar(
     selectedTab: MainTab,
     chatFolder: ChatFolder,
     settingsCategory: SettingsCategory?,
+    selectedCount: Int,
+    selectionPinLabel: String,
     chatsOverflowExpanded: Boolean,
+    selectionOverflowExpanded: Boolean,
     onChatsOverflowDismiss: () -> Unit,
     onChatsOverflowExpand: () -> Unit,
+    onSelectionOverflowDismiss: () -> Unit,
+    onSelectionOverflowExpand: () -> Unit,
     onChatFolderSelected: (ChatFolder) -> Unit,
     onOverflowAction: (ChatsOverflowAction) -> Unit,
     onNavigateBack: () -> Unit,
     onSettingsBack: () -> Unit,
+    onSelectionClose: () -> Unit,
+    onSelectionAction: (ThreadBulkAction) -> Unit,
+    onSelectionPin: (Boolean) -> Unit,
 ) {
     TopAppBar(
         title = {
-            Text(
+            if (selectedCount > 0) {
+                Text("$selectedCount selected")
+            } else Text(
                 when (screen) {
                     AppScreen.SettingsDetail -> settingsCategory?.name?.replace(Regex("([a-z])([A-Z])"), "$1 $2") ?: "Settings"
                     AppScreen.DesktopSync -> "Desktop Sync"
@@ -1675,11 +1748,23 @@ private fun ShellTopAppBar(
                 AppScreen.DesktopSync, AppScreen.Help -> IconButton(onClick = onNavigateBack) {
                     Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
                 }
-                else -> Unit
+                else -> if (selectedCount > 0) IconButton(onClick = onSelectionClose) { Icon(Icons.Default.Close, "Clear selection") }
             }
         },
         actions = {
-            if (screen == AppScreen.Main && selectedTab == MainTab.Chats) {
+            if (selectedCount > 0) {
+                IconButton(onClick = { onSelectionAction(ThreadBulkAction.MarkSpam) }) { Icon(Icons.Default.Warning, "Mark spam") }
+                IconButton(onClick = { onSelectionAction(ThreadBulkAction.Archive) }) { Icon(Icons.Default.List, "Archive") }
+                IconButton(onClick = { onSelectionAction(ThreadBulkAction.Delete) }) { Icon(Icons.Default.Delete, "Delete") }
+                Box {
+                    IconButton(onClick = onSelectionOverflowExpand) { Icon(Icons.Default.MoreVert, "More selection actions") }
+                    DropdownMenu(expanded = selectionOverflowExpanded, onDismissRequest = onSelectionOverflowDismiss) {
+                        DropdownMenuItem(text = { Text(selectionPinLabel) }, onClick = { onSelectionPin(selectionPinLabel == "Pin") })
+                        DropdownMenuItem(text = { Text("Mark read") }, onClick = { onSelectionAction(ThreadBulkAction.MarkRead) })
+                        DropdownMenuItem(text = { Text("Mute") }, onClick = { onSelectionAction(ThreadBulkAction.Mute) })
+                    }
+                }
+            } else if (screen == AppScreen.Main && selectedTab == MainTab.Chats) {
                 Box {
                     IconButton(onClick = onChatsOverflowExpand) {
                         Icon(Icons.Default.MoreVert, "Menu")
