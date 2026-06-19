@@ -25,7 +25,7 @@ class SyncWorker(appContext: Context, params: WorkerParameters) : CoroutineWorke
 
         val api = KheyrApiService(tokenProvider = { preferences.authTokens().first })
         val queueStore = RoomSyncQueueStore(AppDatabase.getInstance(applicationContext).syncQueueDao())
-        val encryptionKey: SecretKey = runCatching { SyncEncryptionKeyStore.getOrCreateKey() }
+        val encryptionKey: SecretKey = runCatching { SyncEncryptionKeyStore(applicationContext).getOrCreateKey() }
             .getOrElse { return Result.retry() }
         val encryptor = SmsBodyEncryptor(encryptionKey)
         val uploader = SyncUploader({ syncSettings }, queueStore, api, encryptor)
