@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
@@ -33,6 +34,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -161,6 +163,8 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
     val snackbarHostState = remember { SnackbarHostState() }
     var inboxNavForward by remember { mutableStateOf(true) }
     var pendingDeleteThreadId by remember { mutableStateOf<Long?>(null) }
+    val threadListState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
+    val contactsListState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
 
     val darkTheme = isKheyrDarkTheme(themePreference)
 
@@ -469,6 +473,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                                         onSearchChange = { contactsSearchQuery = it },
                                         onRequestPermission = { permissionLauncher.launch(requiredPermissions()) },
                                         onContactClick = { openConversationForContact(it) },
+                                        listState = contactsListState,
                                     )
                                     MainTab.Settings -> SettingsListScreen(
                                         onCategoryClick = {
@@ -524,6 +529,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                                         loading = threadsLoading,
                                         onThreadClick = { openConversation(it) },
                                         onThreadLongPress = { showThreadMenu = it },
+                                        listState = threadListState,
                                         emptyText = when {
                                             threadsLoading -> "Loading conversations..."
                                             !smsPermissionGranted -> "Grant SMS access to load conversations"
@@ -1011,6 +1017,7 @@ private fun ThreadFolderScreen(
     loading: Boolean,
     onThreadClick: (SmsThread) -> Unit,
     onThreadLongPress: (SmsThread) -> Unit,
+    listState: LazyListState,
     emptyText: String,
 ) {
     val topInset = KheyrChromeInsets.shellTop()
@@ -1048,6 +1055,7 @@ private fun ThreadFolderScreen(
             Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { Text(emptyText) }
         } else {
             LazyColumn(
+                state = listState,
                 modifier = Modifier.weight(1f),
                 contentPadding = PaddingValues(bottom = bottomInset),
             ) {
@@ -1341,6 +1349,7 @@ private fun ContactsScreen(
     onSearchChange: (String) -> Unit,
     onRequestPermission: () -> Unit,
     onContactClick: (DeviceContact) -> Unit,
+    listState: LazyListState,
 ) {
     val topInset = KheyrChromeInsets.shellTop()
     val bottomInset = KheyrChromeInsets.bottomNav()
@@ -1393,6 +1402,7 @@ private fun ContactsScreen(
                     }
                 } else {
                     LazyColumn(
+                        state = listState,
                         modifier = Modifier.weight(1f),
                         contentPadding = PaddingValues(bottom = bottomInset),
                     ) {
