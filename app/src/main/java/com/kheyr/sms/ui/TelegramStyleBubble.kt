@@ -9,8 +9,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.contentColorFor
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.graphics.takeOrElse
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -29,6 +32,12 @@ fun TelegramStyleBubble(
         darkTheme -> KheyrColors.IncomingBubbleDark
         else -> KheyrColors.IncomingBubbleLight
     }
+    val bubbleContentColor = when {
+        isOutgoing && darkTheme -> KheyrColors.OnOutgoingBubbleDark
+        isOutgoing -> KheyrColors.OnOutgoingBubbleLight
+        darkTheme -> KheyrColors.OnIncomingBubbleDark
+        else -> KheyrColors.OnIncomingBubbleLight
+    }.takeOrElse { contentColorFor(bubbleColor) }
     val shape = if (isOutgoing) {
         RoundedCornerShape(topStart = 18.dp, topEnd = 4.dp, bottomStart = 18.dp, bottomEnd = 18.dp)
     } else {
@@ -42,7 +51,9 @@ fun TelegramStyleBubble(
             .background(bubbleColor)
             .padding(horizontal = 12.dp, vertical = 8.dp),
     ) {
-        content()
+        CompositionLocalProvider(LocalContentColor provides bubbleContentColor) {
+            content()
+        }
     }
 }
 

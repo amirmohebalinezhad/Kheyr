@@ -82,8 +82,8 @@ fun TelegramStyleComposer(
                                 textStyle = MaterialTheme.typography.bodyLarge.copy(textAlign = draftTextAlign),
                                 shape = RoundedCornerShape(24.dp),
                                 colors = TextFieldDefaults.colors(
-                                    focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
                                     focusedIndicatorColor = Color.Transparent,
                                     unfocusedIndicatorColor = Color.Transparent,
                                 ),
