@@ -36,8 +36,8 @@ class SyncWorker(appContext: Context, params: WorkerParameters) : CoroutineWorke
 
         val cursor = preferences.syncCursor()
         api.downloadSyncUpdates(cursor)?.let { response ->
-            SyncDownloader().parse(cursor, response.changes.length(), response.nextCursor, response.hasMore)
-            preferences.saveSyncCursor(response.nextCursor)
+            val result = SyncDownloader().parse(cursor, response.changes.length(), response.nextCursor, response.hasMore)
+            preferences.saveSyncCursor(result.nextCursor)
         }
         return Result.success()
     }
