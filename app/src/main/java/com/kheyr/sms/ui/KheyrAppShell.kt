@@ -15,6 +15,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -285,13 +286,15 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
         when {
             screen == AppScreen.Conversation -> {
                 inboxNavForward = false
-                scope.launch {
-                    selectedThread?.id?.let { repository.markThreadRead(it) }
-                    selectedThread = null
-                    screen = AppScreen.Main
-                    conversationSearchActive = false
-                    conversationSearchQuery = ""
-                }
+                // Flip state synchronously so the slide-out starts on this frame; the exiting Chat
+                // pane keeps rendering from lastOpenedThread. mark-read is a DB write, so push it to
+                // the background instead of letting it stall the back animation.
+                val closing = selectedThread
+                selectedThread = null
+                screen = AppScreen.Main
+                conversationSearchActive = false
+                conversationSearchQuery = ""
+                closing?.id?.let { id -> scope.launch { repository.markThreadRead(id) } }
             }
             screen == AppScreen.NewMessage -> {
                 screen = AppScreen.Main
@@ -747,13 +750,20 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                             AnimatedContent(
                                 targetState = inboxPane,
                                 transitionSpec = {
-                                    if (inboxNavForward) {
+                                    // The Chat pane slides opaquely over/off; the threads List pane also
+                                    // fades as it parallaxes (it/3) so it doesn't linger half-visible
+                                    // behind the chat. Disable the size clip so neither pane is cropped
+                                    // mid-slide (e.g. when the IME/composer changes the chat's height).
+                                    val transform = if (inboxNavForward) {
                                         slideInHorizontally(animationSpec = tween(300)) { it } togetherWith
-                                            slideOutHorizontally(animationSpec = tween(300)) { -it / 3 }
+                                            (slideOutHorizontally(animationSpec = tween(300)) { -it / 3 } +
+                                                fadeOut(tween(300)))
                                     } else {
-                                        slideInHorizontally(animationSpec = tween(300)) { -it / 3 } togetherWith
+                                        (slideInHorizontally(animationSpec = tween(300)) { -it / 3 } +
+                                            fadeIn(tween(300))) togetherWith
                                             slideOutHorizontally(animationSpec = tween(300)) { it }
                                     }
+                                    transform.using(SizeTransform(clip = false))
                                 },
                                 label = "inbox",
                             ) { pane ->

@@ -69,6 +69,9 @@ dependencies {
     // Real-time backend channel (desktop SMS relay, pairing approval, device revoke). Pulls RxJava3 + Gson.
     // Version tracks ASP.NET Core SignalR; confirm an available release if dependency resolution fails.
     implementation 'com.microsoft.signalr:signalr:8.0.0'
+    // Gson is pulled in transitively by SignalR, but we reference it directly (SerializedName on the
+    // realtime event wire models), so declare it explicitly to keep it on the compile classpath.
+    implementation 'com.google.code.gson:gson:2.11.0'
     // QR scanning for desktop pairing (Android scans the QR shown on the desktop client).
     implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
     // FCM push (wakes the app for relay/sync). INERT until a google-services.json is added and the
