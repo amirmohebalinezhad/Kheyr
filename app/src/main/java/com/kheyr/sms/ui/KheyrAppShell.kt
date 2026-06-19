@@ -14,9 +14,14 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
@@ -750,10 +755,16 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                     }
                 }
 
-                if (showShellTopBar) {
+                // The inbox top bar slides/fades in sync with the inbox<->conversation content
+                // slide (tween 300) instead of popping the instant `screen` flips.
+                AnimatedVisibility(
+                    visible = showShellTopBar,
+                    enter = fadeIn(tween(300)) + slideInHorizontally(tween(300)) { -it / 3 },
+                    exit = fadeOut(tween(300)) + slideOutHorizontally(tween(300)) { -it / 3 },
+                    modifier = Modifier.align(Alignment.TopCenter),
+                ) {
                     GlassTopBar(
                         modifier = Modifier
-                            .align(Alignment.TopCenter)
                             .fillMaxWidth()
                             .statusBarsPadding(),
                     ) {
@@ -795,14 +806,20 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                     }
                 }
 
-                if (screen == AppScreen.Conversation) {
-                    selectedThread?.let { thread ->
+                // The conversation top bar slides in from the right with its content (and out with
+                // it on back), using lastOpenedThread so it stays rendered through the exit slide.
+                AnimatedVisibility(
+                    visible = screen == AppScreen.Conversation,
+                    enter = fadeIn(tween(300)) + slideInHorizontally(tween(300)) { it },
+                    exit = fadeOut(tween(300)) + slideOutHorizontally(tween(300)) { it },
+                    modifier = Modifier.align(Alignment.TopCenter),
+                ) {
+                    (selectedThread ?: lastOpenedThread)?.let { thread ->
                         val headerSubtitle = screenMapper.map(thread, messages, sims, composerState).header.subtitle
                         ConversationTopBar(
                             thread = thread,
                             headerSubtitle = headerSubtitle,
                             modifier = Modifier
-                                .align(Alignment.TopCenter)
                                 .fillMaxWidth()
                                 .statusBarsPadding(),
                             onNavigateBack = { navigateBack() },
@@ -815,7 +832,14 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                     }
                 }
 
-                if (screen == AppScreen.Main) {
+                // The bottom nav slides down/fades out when leaving the inbox (e.g. opening a thread)
+                // instead of vanishing instantly while the content slides.
+                AnimatedVisibility(
+                    visible = screen == AppScreen.Main,
+                    enter = fadeIn(tween(300)) + slideInVertically(tween(300)) { it },
+                    exit = fadeOut(tween(300)) + slideOutVertically(tween(300)) { it },
+                    modifier = Modifier.align(Alignment.BottomCenter),
+                ) {
                     KheyrBottomNav(
                         selectedTab = selectedTab,
                         onTabSelected = { tab ->
@@ -826,7 +850,6 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                             threadSelection = threadSelection.clear()
                         },
                         modifier = Modifier
-                            .align(Alignment.BottomCenter)
                             .fillMaxWidth()
                             .navigationBarsPadding(),
                     )
