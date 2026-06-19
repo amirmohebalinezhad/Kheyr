@@ -126,6 +126,10 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
     var contactsSearchQuery by remember { mutableStateOf("") }
     var newMessageQuery by remember { mutableStateOf("") }
     var selectedThread by remember { mutableStateOf<SmsThread?>(null) }
+    // Retains the open thread while the back/close slide is running. navigateBack() clears
+    // selectedThread synchronously, so the outgoing Chat pane is rendered from this snapshot
+    // (resolved by pane.threadId) instead of going blank mid-animation.
+    var lastOpenedThread by remember { mutableStateOf<SmsThread?>(null) }
     var messages by remember { mutableStateOf<List<SmsMessage>>(emptyList()) }
     var composerState by remember { mutableStateOf(SmsComposerState()) }
     var searchQuery by remember { mutableStateOf("") }
@@ -189,6 +193,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
         threadSelection = threadSelection.clear()
         inboxNavForward = true
         selectedThread = thread
+        lastOpenedThread = thread
         messages = emptyList()
         conversationSearchActive = false
         conversationSearchQuery = ""
@@ -663,7 +668,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                                             else -> "No conversations yet"
                                         },
                                     )
-                                    is InboxPane.Chat -> selectedThread?.takeIf { it.id == pane.threadId }?.let { thread ->
+                                    is InboxPane.Chat -> (selectedThread ?: lastOpenedThread)?.takeIf { it.id == pane.threadId }?.let { thread ->
                                         val screenModel = screenMapper.map(thread, messages, sims, composerState)
                                         ConversationScreenContent(
                                             screen = screenModel,
