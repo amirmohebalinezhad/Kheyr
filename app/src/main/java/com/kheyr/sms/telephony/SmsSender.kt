@@ -22,12 +22,15 @@ class SmsSender(private val context: Context) {
         val sentIntents = parts.indices.map { index ->
             statusIntent(ACTION_SMS_SENT, request, index, parts.size)
         }
+        val deliveryIntents = parts.indices.map { index ->
+            statusIntent(ACTION_SMS_DELIVERED, request, index, parts.size)
+        }
         smsManager.sendMultipartTextMessage(
             request.recipient,
             null,
             parts,
             ArrayList(sentIntents),
-            null,
+            ArrayList(deliveryIntents),
         )
         return SmsSendResult(parts = parts.size, subscriptionId = request.subscriptionId)
     }
