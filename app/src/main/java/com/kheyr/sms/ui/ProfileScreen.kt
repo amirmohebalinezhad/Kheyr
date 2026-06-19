@@ -8,10 +8,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -23,11 +31,16 @@ fun ProfileScreen(
     themePreference: ThemePreference,
     onThemeChange: (ThemePreference) -> Unit,
     onHelpClick: () -> Unit,
+    phoneNumber: String?,
+    signedIn: Boolean,
+    onLogout: () -> Unit,
+    onDeleteAccount: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val help = HelpFeedbackModel(helpUrl = "https://kheyr.app/help", supportEmail = "support@kheyr.app")
     val topInset = KheyrChromeInsets.shellTop()
     val bottomInset = KheyrChromeInsets.bottomNav()
+    var showDeleteConfirm by remember { mutableStateOf(false) }
 
     Column(
         modifier = modifier
@@ -40,6 +53,19 @@ fun ProfileScreen(
         Column(modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)) {
             Text("Kheyr", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
             Text("SMS Client", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+
+        SettingsSection(title = "Account") {
+            Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    if (signedIn) phoneNumber ?: "Signed in" else "Not signed in",
+                    style = MaterialTheme.typography.bodyLarge,
+                )
+                if (signedIn) {
+                    OutlinedButton(onClick = onLogout, modifier = Modifier.fillMaxWidth()) { Text("Log out") }
+                    Button(onClick = { showDeleteConfirm = true }, modifier = Modifier.fillMaxWidth()) { Text("Delete account") }
+                }
+            }
         }
 
         SettingsSection(title = "Appearance") {
@@ -73,5 +99,22 @@ fun ProfileScreen(
                 )
             }
         }
+    }
+
+    if (showDeleteConfirm) {
+        AlertDialog(
+            onDismissRequest = { showDeleteConfirm = false },
+            title = { Text("Delete account?") },
+            text = { Text("This permanently deletes your account and all synced cloud data. SMS already on this phone are not removed. This cannot be undone.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDeleteConfirm = false
+                    onDeleteAccount()
+                }) { Text("Delete") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteConfirm = false }) { Text("Cancel") }
+            },
+        )
     }
 }

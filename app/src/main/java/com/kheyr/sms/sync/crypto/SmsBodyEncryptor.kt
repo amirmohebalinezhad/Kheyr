@@ -23,6 +23,19 @@ class SmsBodyEncryptor(
         )
     }
 
+    /** Inverse of [encryptBody]; the GCM tag is verified, so tampered ciphertext throws. */
+    fun decryptBody(body: EncryptedSmsBody): String {
+        val nonce = Base64.getDecoder().decode(body.nonceBase64)
+        val ciphertext = Base64.getDecoder().decode(body.ciphertextBase64)
+        val cipher = Cipher.getInstance(TRANSFORMATION)
+        cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(TAG_BITS, nonce))
+        return String(cipher.doFinal(ciphertext), Charsets.UTF_8)
+    }
+
+    /** Decrypts a [EncryptedSmsBody.wireFormat] blob (e.g. a relayed desktop SMS body/number). */
+    fun decryptWireFormat(wire: String): String =
+        decryptBody(EncryptedSmsBody.parse(wire) ?: error("Malformed encrypted payload"))
+
     companion object {
         private const val TRANSFORMATION = "AES/GCM/NoPadding"
         private const val ALGORITHM_NAME = "AES-256-GCM"
@@ -43,4 +56,13 @@ data class EncryptedSmsBody(
      * device (e.g. a paired desktop) splits it back into its three parts.
      */
     fun wireFormat(): String = "$algorithm.$nonceBase64.$ciphertextBase64"
+
+    companion object {
+        /** Splits a [wireFormat] blob back into its three parts; null if the shape is not recognized. */
+        fun parse(wire: String): EncryptedSmsBody? {
+            val parts = wire.split('.')
+            if (parts.size != 3 || parts.any(String::isBlank)) return null
+            return EncryptedSmsBody(algorithm = parts[0], nonceBase64 = parts[1], ciphertextBase64 = parts[2])
+        }
+    }
 }

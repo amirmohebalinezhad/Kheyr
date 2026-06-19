@@ -38,6 +38,16 @@ class AppPreferences(context: Context) {
         get() = prefs.getBoolean(KEY_DIRECT_MESSAGES, true)
         set(value) = prefs.edit().putBoolean(KEY_DIRECT_MESSAGES, value).apply()
 
+    /** The signed-in phone number (E.164), shown on the profile screen. Null when signed out. */
+    var userPhone: String?
+        get() = prefs.getString(KEY_USER_PHONE, null)
+        set(value) = prefs.edit().apply { if (value == null) remove(KEY_USER_PHONE) else putString(KEY_USER_PHONE, value) }.apply()
+
+    /** Latest FCM push token. Captured on refresh; sent to the backend during device registration. */
+    var pushToken: String?
+        get() = prefs.getString(KEY_PUSH_TOKEN, null)
+        set(value) = prefs.edit().apply { if (value == null) remove(KEY_PUSH_TOKEN) else putString(KEY_PUSH_TOKEN, value) }.apply()
+
     var spamAutoDeleteDays: Int
         get() = prefs.getInt(KEY_SPAM_AUTO_DELETE_DAYS, 0)
         set(value) = prefs.edit().putInt(KEY_SPAM_AUTO_DELETE_DAYS, value).apply()
@@ -145,6 +155,8 @@ class AppPreferences(context: Context) {
         private const val KEY_THEME = "theme"
         private const val KEY_DEFAULT_SUB = "default_subscription_id"
         private const val KEY_DIRECT_MESSAGES = "direct_messages_enabled"
+        private const val KEY_USER_PHONE = "user_phone"
+        private const val KEY_PUSH_TOKEN = "push_token"
         private const val KEY_SPAM_AUTO_DELETE_DAYS = "spam_auto_delete_days"
         private const val KEY_NOTIF_CONTENT = "notif_content_mode"
         private const val KEY_UNKNOWN_SENDER = "unknown_sender_mode"

@@ -1,6 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-feature android:name="android.hardware.telephony" android:required="false" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
 
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.READ_SMS" />
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
     <uses-permission android:name="android.permission.RECEIVE_WAP_PUSH" />
@@ -75,6 +78,16 @@
                 <action android:name="com.kheyr.sms.action.SMS_DELIVERED" />
             </intent-filter>
         </receiver>
+
+        <!-- FCM wakes the app for desktop-SMS relay/sync. Inert until a Firebase google-services.json
+             is added and the backend sends pushes; safe to leave registered without that setup. -->
+        <service
+            android:name=".messaging.KheyrFirebaseMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
 
         <service
             android:name=".service.HeadlessSmsSendService"

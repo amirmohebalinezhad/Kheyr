@@ -66,6 +66,15 @@ dependencies {
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
     implementation 'androidx.work:work-runtime-ktx:2.10.0'
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0'
+    // Real-time backend channel (desktop SMS relay, pairing approval, device revoke). Pulls RxJava3 + Gson.
+    // Version tracks ASP.NET Core SignalR; confirm an available release if dependency resolution fails.
+    implementation 'com.microsoft.signalr:signalr:8.0.0'
+    // QR scanning for desktop pairing (Android scans the QR shown on the desktop client).
+    implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
+    // FCM push (wakes the app for relay/sync). INERT until a google-services.json is added and the
+    // `com.google.gms.google-services` plugin is applied; the dependency alone is build-safe.
+    implementation platform('com.google.firebase:firebase-bom:33.7.0')
+    implementation 'com.google.firebase:firebase-messaging'
     ksp 'androidx.room:room-compiler:2.6.1'
     testImplementation 'junit:junit:4.13.2'
     testImplementation 'androidx.room:room-testing:2.6.1'

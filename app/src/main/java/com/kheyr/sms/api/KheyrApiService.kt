@@ -15,7 +15,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
-data class AuthTokenResponse(val accessToken: String, val refreshToken: String, val expiresInSeconds: Long)
+data class AuthTokenResponse(val accessToken: String, val refreshToken: String, val expiresInSeconds: Long, val deviceId: String? = null)
 
 data class SyncDownloadResponse(val changes: JSONArray, val nextCursor: String?, val hasMore: Boolean)
 
@@ -83,6 +83,40 @@ class KheyrApiService(
         postJson("/api/v1/pairing/approve", JSONObject().put("session_id", sessionId).put("device_name", deviceName))
 
     fun revokeDevice(deviceId: String): Boolean = postJson("/api/v1/pairing/revoke", JSONObject().put("device_id", deviceId)) != null
+
+    /** Active (non-revoked) devices for the signed-in account. Empty when unauthenticated/unconfigured. */
+    fun listDevices(): List<RemoteDevice> {
+        val devices = getJson("/api/v1/devices")?.optJSONArray("devices") ?: return emptyList()
+        return buildList {
+            for (index in 0 until devices.length()) {
+                val obj = devices.getJSONObject(index)
+                add(
+                    RemoteDevice(
+                        id = obj.optString("device_id"),
+                        name = obj.optString("device_name"),
+                        type = obj.optString("device_type"),
+                        platform = obj.optString("platform"),
+                        lastActiveAtEpochSeconds = obj.optLong("last_active_at").takeIf { it > 0L },
+                    ),
+                )
+            }
+        }
+    }
+
+    /** Revokes the current device's refresh tokens server-side. */
+    fun logout(): Boolean = postJson("/api/v1/auth/logout", JSONObject()) != null
+
+    /** Soft-deletes the account and its cloud data server-side. */
+    fun deleteAccount(): Boolean = deleteJson("/api/v1/account") != null
+
+    /** Android reports the outcome of a relayed desktop SMS. [status] matches the backend enum (e.g. "Sent"/"Failed"). */
+    fun updateDesktopSmsStatus(requestId: String, status: String, failureReason: String? = null): Boolean =
+        postJson(
+            "/api/v1/desktop/sms/status",
+            JSONObject().put("request_id", requestId).put("status", status).apply {
+                if (failureReason != null) put("failure_reason", failureReason)
+            },
+        ) != null
 
     fun sendDesktopSms(payload: JSONObject): JSONObject? = postJson("/api/v1/desktop/sms/send", payload)
 
@@ -153,6 +187,12 @@ class KheyrApiService(
         return executeJson(request)
     }
 
+    private fun deleteJson(path: String): JSONObject? {
+        if (!ApiConfig.isConfigured) return null
+        val request = authorized(Request.Builder().url(ApiConfig.endpoint(path)).delete().build()) ?: return null
+        return executeJson(request)
+    }
+
     private fun authorized(request: Request): Request? {
         val token = tokenProvider()
         return if (token.isNullOrBlank()) request else request.newBuilder().header("Authorization", "Bearer $token").build()
@@ -170,6 +210,7 @@ class KheyrApiService(
         accessToken = json.getString("access_token"),
         refreshToken = json.getString("refresh_token"),
         expiresInSeconds = json.optLong("expires_in", 3600),
+        deviceId = json.optString("device_id").takeIf { it.isNotBlank() },
     )
 
     private fun parseSpamRuleSet(json: JSONObject): SpamRuleSet {

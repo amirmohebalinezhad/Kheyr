@@ -54,8 +54,20 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.kheyr.sms.KheyrApplication
 import com.kheyr.sms.R
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 import com.kheyr.sms.api.ApiConfig
 import com.kheyr.sms.api.KheyrApiService
+import com.kheyr.sms.api.RemoteDevice
+import com.kheyr.sms.desktop.DesktopRelayExecutor
+import com.kheyr.sms.desktop.DesktopRelayResolver
+import com.kheyr.sms.desktop.PairingQrCodec
+import com.kheyr.sms.desktop.PairingQrResult
+import com.kheyr.sms.desktop.PairingQrValidator
+import com.kheyr.sms.realtime.KheyrRealtimeClient
+import com.kheyr.sms.sync.SyncEncryptionKeyStore
+import com.kheyr.sms.sync.crypto.EncryptedSmsBody
+import com.kheyr.sms.sync.crypto.SmsBodyEncryptor
 import com.kheyr.sms.conversation.ConversationSearchMatcher
 import com.kheyr.sms.contacts.ContactRepository
 import com.kheyr.sms.contacts.DeviceContact
@@ -87,8 +99,10 @@ import com.kheyr.sms.thread.SearchableThread
 import com.kheyr.sms.worker.KheyrWorkerScheduler
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.kheyr.sms.util.JalaliDateFormatter
 import java.time.Instant
 import kotlin.math.roundToInt
@@ -124,6 +138,37 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
     // All thread-list reloads run through this single job; starting a new one cancels the previous
     // so concurrent loads can't land out of order or clobber an optimistic update.
     val reloadJob = remember { mutableStateOf<Job?>(null) }
+
+    // Real-time backend channel: receives desktop-SMS relay requests and runs them through the
+    // decrypt -> persist -> send -> report-status pipeline. Null until a backend URL is configured.
+    val realtimeClient = remember {
+        if (!ApiConfig.isConfigured) {
+            null
+        } else {
+            KheyrRealtimeClient(
+                baseUrl = ApiConfig.baseUrl,
+                accessTokenProvider = { preferences.authTokens().first },
+                onDesktopSmsRequest = { payload ->
+                    val encryptor = SmsBodyEncryptor(SyncEncryptionKeyStore(context).getOrCreateKey())
+                    val resolver = DesktopRelayResolver(
+                        // Relayed body/number arrive encrypted with the shared sync key; fall back to
+                        // treating the value as plaintext if it isn't in encrypted wire form.
+                        decrypt = { value -> EncryptedSmsBody.parse(value)?.let(encryptor::decryptBody) ?: value },
+                        resolveSubscriptionId = { simId -> simId?.toIntOrNull() ?: preferences.defaultSubscriptionId },
+                    )
+                    val executor = DesktopRelayExecutor(resolver, sender, repository, api)
+                    scope.launch { executor.handle(payload) }
+                },
+            )
+        }
+    }
+    // Re-evaluated each recomposition; flips true after sign-in (and false after logout), so the
+    // effect (re)connects/disconnects the realtime channel at the right moments rather than only at launch.
+    val realtimeSignedIn = preferences.authTokens().first != null
+    DisposableEffect(realtimeSignedIn) {
+        if (realtimeSignedIn) realtimeClient?.start()
+        onDispose { realtimeClient?.stop() }
+    }
 
     var screen by remember { mutableStateOf(if (preferences.onboardingComplete) AppScreen.Main else AppScreen.Onboarding) }
     var selectedTab by remember { mutableStateOf(MainTab.Chats) }
@@ -600,10 +645,31 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                             onSkipSync = { preferences.syncOptInSkipped = true; onboardingStep = 4 },
                             onEnableSync = { syncEnabled = true; preferences.saveSyncSettings(preferences.syncSettings().copy(enabled = true)); KheyrWorkerScheduler.scheduleAll(context, true); onboardingStep = 4 },
                             onVerifyOtp = {
-                                if (api.verifyOtp(otpPhone, otpCode) != null || !ApiConfig.isConfigured) onboardingStep = 3 else statusMessage = "OTP verification failed. Check code or configure API base URL."
+                                scope.launch(Dispatchers.IO) {
+                                    // Persist tokens + device_id so every authenticated feature (sync, pairing,
+                                    // relay, logout) can authenticate. The verify response already registers an
+                                    // Android device server-side, so no separate registerDevice call is needed.
+                                    val tokens = api.verifyOtp(otpPhone, otpCode)
+                                    if (tokens != null) {
+                                        preferences.saveAuthTokens(tokens.accessToken, tokens.refreshToken)
+                                        preferences.userPhone = otpPhone
+                                        tokens.deviceId?.let { id ->
+                                            preferences.saveSyncSettings(preferences.syncSettings().copy(deviceId = id))
+                                        }
+                                    }
+                                    withContext(Dispatchers.Main) {
+                                        if (tokens != null || !ApiConfig.isConfigured) onboardingStep = 3
+                                        else statusMessage = "OTP verification failed. Check code or configure API base URL."
+                                    }
+                                }
                             },
                             onRequestOtp = {
-                                if (api.requestOtp(otpPhone) || !ApiConfig.isConfigured) statusMessage = "OTP sent (or configure ${ApiConfig.BASE_URL_PLACEHOLDER})" else statusMessage = "Failed to request OTP"
+                                scope.launch(Dispatchers.IO) {
+                                    val sent = api.requestOtp(otpPhone)
+                                    withContext(Dispatchers.Main) {
+                                        statusMessage = if (sent || !ApiConfig.isConfigured) "OTP sent (or configure ${ApiConfig.BASE_URL_PLACEHOLDER})" else "Failed to request OTP"
+                                    }
+                                }
                             },
                             onFinish = { preferences.onboardingComplete = true; screen = AppScreen.Main; selectedTab = MainTab.Chats; refreshThreads() },
                         )
@@ -641,6 +707,32 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                                         themePreference = themePreference,
                                         onThemeChange = { themePreference = it; preferences.themePreference = it },
                                         onHelpClick = { screen = AppScreen.Help },
+                                        phoneNumber = preferences.userPhone,
+                                        signedIn = preferences.authTokens().first != null,
+                                        onLogout = {
+                                            scope.launch(Dispatchers.IO) {
+                                                api.logout()
+                                                clearLocalSession(preferences)
+                                                withContext(Dispatchers.Main) {
+                                                    realtimeClient?.stop()
+                                                    statusMessage = "Signed out"
+                                                    onboardingStep = 0
+                                                    screen = AppScreen.Onboarding
+                                                }
+                                            }
+                                        },
+                                        onDeleteAccount = {
+                                            scope.launch(Dispatchers.IO) {
+                                                api.deleteAccount()
+                                                clearLocalSession(preferences)
+                                                withContext(Dispatchers.Main) {
+                                                    realtimeClient?.stop()
+                                                    statusMessage = "Account deleted"
+                                                    onboardingStep = 0
+                                                    screen = AppScreen.Onboarding
+                                                }
+                                            }
+                                        },
                                     )
                                     MainTab.Chats -> Unit
                                 }
@@ -786,7 +878,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                                 onExportCloudData = { if (api.exportCloudData() != null) statusMessage = "Export requested" else statusMessage = "Configure API base URL first" },
                             )
                         }
-                        AppScreen.DesktopSync -> DesktopSyncScreen(apiBaseUrl = ApiConfig.baseUrl, onRevoke = { statusMessage = "Revoke device via Settings when backend is configured." })
+                        AppScreen.DesktopSync -> DesktopSyncScreen(api = api, onStatus = { statusMessage = it })
                         AppScreen.Help -> HelpScreen()
                     }
                 }
@@ -1485,6 +1577,7 @@ private fun SettingsDetailScreen(
     onExportCloudData: () -> Unit,
 ) {
     val topInset = KheyrChromeInsets.shellTop()
+    val context = LocalContext.current
     Column(Modifier.fillMaxSize().padding(top = topInset, start = 16.dp, end = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         when (category) {
             SettingsCategory.Notifications -> {
@@ -1531,30 +1624,126 @@ private fun SettingsDetailScreen(
             SettingsCategory.About -> {
                 KheyrBrandHeader(subtitle = "Version 0.1.0")
                 Text("Modern SMS with spam filtering, sync, and desktop relay.", style = MaterialTheme.typography.bodyMedium)
-                TextButton(onClick = {}) { Text("Privacy policy") }
+                TextButton(onClick = {
+                    context.safeStartActivity(Intent(Intent.ACTION_VIEW, Uri.parse(PRIVACY_POLICY_URL)))
+                }) { Text("Privacy policy") }
             }
         }
     }
 }
 
 @Composable
-private fun DesktopSyncScreen(apiBaseUrl: String, onRevoke: () -> Unit) {
+private fun DesktopSyncScreen(api: KheyrApiService, onStatus: (String) -> Unit) {
     val topInset = KheyrChromeInsets.shellTop()
+    val scope = rememberCoroutineScope()
+    var devices by remember { mutableStateOf<List<RemoteDevice>>(emptyList()) }
+    var loading by remember { mutableStateOf(false) }
+
+    fun refresh() {
+        if (!ApiConfig.isConfigured) return
+        loading = true
+        scope.launch(Dispatchers.IO) {
+            val result = api.listDevices().filter { it.isDesktop }
+            withContext(Dispatchers.Main) { devices = result; loading = false }
+        }
+    }
+
+    val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
+        val raw = result.contents
+        if (raw == null) {
+            onStatus("Pairing cancelled")
+            return@rememberLauncherForActivityResult
+        }
+        when (val parsed = PairingQrValidator.validate(PairingQrCodec.parse(raw), System.currentTimeMillis() / 1000)) {
+            is PairingQrResult.Invalid -> onStatus(parsed.reason)
+            is PairingQrResult.Valid -> scope.launch(Dispatchers.IO) {
+                val ok = api.approvePairing(parsed.sessionId, "Desktop") != null
+                withContext(Dispatchers.Main) {
+                    onStatus(if (ok) "Desktop paired" else "Pairing failed — check connection")
+                    if (ok) refresh()
+                }
+            }
+        }
+    }
+
+    LaunchedEffect(Unit) { refresh() }
+
     Column(Modifier.fillMaxSize().padding(top = topInset, start = 24.dp, end = 24.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Pair your desktop app by scanning a QR code shown on the desktop client.", style = MaterialTheme.typography.bodyLarge)
-        Text("Backend URL: $apiBaseUrl", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold)
-        Text("Replace YOUR-BASE-URL in app/build.gradle with your server address.", style = MaterialTheme.typography.bodySmall)
-        OutlinedButton(onClick = onRevoke, modifier = Modifier.fillMaxWidth()) { Text("Revoke paired device") }
+        Text("Pair a desktop", style = MaterialTheme.typography.titleMedium)
+        Text(
+            "Scan the QR code shown on the Kheyr desktop app to let it read and send SMS through this phone.",
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        Button(
+            onClick = {
+                if (!ApiConfig.isConfigured) {
+                    onStatus("Configure the backend URL first")
+                    return@Button
+                }
+                scanLauncher.launch(ScanOptions().setOrientationLocked(false).setBeepEnabled(false).setPrompt("Scan the desktop pairing QR"))
+            },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("Scan pairing QR") }
+
+        Text("Paired desktops", style = MaterialTheme.typography.titleSmall)
+        when {
+            !ApiConfig.isConfigured -> Text("Configure the backend URL to manage paired devices.", style = MaterialTheme.typography.bodySmall)
+            loading && devices.isEmpty() -> Text("Loading…", style = MaterialTheme.typography.bodySmall)
+            devices.isEmpty() -> Text("No desktops paired yet.", style = MaterialTheme.typography.bodySmall)
+            else -> devices.forEach { device ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(device.name.ifBlank { "Desktop" }, style = MaterialTheme.typography.bodyLarge)
+                        Text(device.platform, style = MaterialTheme.typography.labelSmall)
+                    }
+                    OutlinedButton(onClick = {
+                        scope.launch(Dispatchers.IO) {
+                            val ok = api.revokeDevice(device.id)
+                            withContext(Dispatchers.Main) {
+                                onStatus(if (ok) "Device revoked" else "Revoke failed")
+                                if (ok) refresh()
+                            }
+                        }
+                    }) { Text("Revoke") }
+                }
+            }
+        }
     }
 }
 
 @Composable
 private fun HelpScreen() {
     val topInset = KheyrChromeInsets.shellTop()
+    val context = LocalContext.current
     val help = HelpFeedbackModel(helpUrl = "https://kheyr.app/help", supportEmail = "support@kheyr.app")
     Column(Modifier.padding(top = topInset, start = 24.dp, end = 24.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Help & Feedback"); Text("Email: ${help.supportEmail}"); Text("Help center: ${help.helpUrl}")
+        Text("Help & Feedback", style = MaterialTheme.typography.titleMedium)
+        Button(
+            onClick = { context.safeStartActivity(Intent(Intent.ACTION_VIEW, Uri.parse(help.helpUrl))) },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("Open help center") }
+        OutlinedButton(
+            onClick = { context.safeStartActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:${help.supportEmail}"))) },
+            modifier = Modifier.fillMaxWidth(),
+        ) { Text("Email support") }
+        Text("Help center: ${help.helpUrl}", style = MaterialTheme.typography.labelSmall)
+        Text("Email: ${help.supportEmail}", style = MaterialTheme.typography.labelSmall)
     }
+}
+
+private const val PRIVACY_POLICY_URL = "https://kheyr.app/privacy"
+
+/** Clears all signed-in state locally (tokens, phone, sync device) and routes back to onboarding. */
+private fun clearLocalSession(preferences: AppPreferences) {
+    preferences.clearAuthTokens()
+    preferences.userPhone = null
+    preferences.saveSyncSettings(preferences.syncSettings().copy(enabled = false, deviceId = null))
+    preferences.onboardingComplete = false
+}
+
+/** Launches an intent, ignoring the case where no app can handle it (avoids ActivityNotFoundException crashes). */
+private fun android.content.Context.safeStartActivity(intent: Intent) {
+    runCatching { startActivity(intent) }
 }
 
 
