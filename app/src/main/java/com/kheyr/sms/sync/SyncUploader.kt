@@ -6,6 +6,12 @@ import com.kheyr.sms.sync.crypto.SmsBodyEncryptor
 interface SyncQueueStore {
     fun pendingRecords(limit: Int = 100): List<SyncQueueRecord>
     fun markUploaded(queueIds: List<Long>)
+
+    /**
+     * Removes successfully uploaded rows so the encrypted queue stays bounded and does not retain
+     * plaintext payloads after upload. Defaults to [markUploaded] for stores that cannot delete.
+     */
+    fun deleteUploaded(queueIds: List<Long>) = markUploaded(queueIds)
 }
 
 interface SyncApiClient {
@@ -41,12 +47,15 @@ class SyncUploader(
             .map { it.queueId }
         val payloads = records.mapNotNull { toUploadDto(it, addressHasher) }
         if (payloads.isEmpty()) {
-            if (skippedDeletedBackfillIds.isNotEmpty()) queueStore.markUploaded(skippedDeletedBackfillIds)
+            // Nothing to upload, but skipped pre-sync deletions still occupy rows; drop them.
+            if (skippedDeletedBackfillIds.isNotEmpty()) queueStore.deleteUploaded(skippedDeletedBackfillIds)
             return 0
         }
 
         apiClient.upload(payloads)
-        queueStore.markUploaded(payloads.map { it.queueId } + skippedDeletedBackfillIds)
+        // Delete only after a confirmed successful upload so retry semantics (pending() returns
+        // rows that are still present) keep working when upload fails.
+        queueStore.deleteUploaded(payloads.map { it.queueId } + skippedDeletedBackfillIds)
         logger.info("Uploaded ${payloads.size} encrypted sync event(s)")
         return payloads.size
     }

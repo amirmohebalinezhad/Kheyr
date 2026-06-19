@@ -17,6 +17,10 @@ class RoomSyncQueueStore(private val dao: SyncQueueDao) : SyncQueueStore {
         if (queueIds.isNotEmpty()) dao.markUploaded(queueIds)
     }
 
+    override fun deleteUploaded(queueIds: List<Long>) {
+        if (queueIds.isNotEmpty()) dao.deleteByIds(queueIds)
+    }
+
     fun enqueueMessage(message: SmsMessage, initialBackfill: Boolean = false, locallyDeletedBeforeSync: Boolean = false) {
         val type = if (initialBackfill) "initial_backfill" else "message_change"
         dao.insert(

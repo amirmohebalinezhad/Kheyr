@@ -15,4 +15,7 @@ interface SyncQueueDao {
 
     @Query("UPDATE sync_queue SET uploaded = 1 WHERE id IN (:ids)")
     fun markUploaded(ids: List<Long>)
+
+    @Query("DELETE FROM sync_queue WHERE id IN (:ids)")
+    fun deleteByIds(ids: List<Long>)
 }
