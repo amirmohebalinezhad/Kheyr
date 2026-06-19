@@ -28,18 +28,23 @@ class ConversationScreenMapper(
 ) {
     fun map(thread: SmsThread, messages: List<SmsMessage>, sims: List<SimCard>, composer: SmsComposerState): ConversationScreenModel =
         ConversationScreenModel(
-            header = headerMapper.map(
-                ConversationHeaderInput(
-                    address = thread.address,
-                    displayName = thread.displayName,
-                    subscriptionId = thread.simSlot,
-                    messageCount = messages.size,
-                    photoUri = thread.contactPhotoUri,
-                ),
-                sims,
-            ),
+            header = header(thread, messages.size, sims),
             messages = messages.map(::mapMessage),
             composer = composer,
+        )
+
+    // Header-only mapping for the conversation top bar, so it doesn't map every message body
+    // (date formatting + OTP regex) just to read the subtitle.
+    fun header(thread: SmsThread, messageCount: Int, sims: List<SimCard>): ConversationHeader =
+        headerMapper.map(
+            ConversationHeaderInput(
+                address = thread.address,
+                displayName = thread.displayName,
+                subscriptionId = thread.simSlot,
+                messageCount = messageCount,
+                photoUri = thread.contactPhotoUri,
+            ),
+            sims,
         )
 
     private fun mapMessage(message: SmsMessage): ConversationMessageRow = ConversationMessageRow(

@@ -675,7 +675,11 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                                         },
                                     )
                                     is InboxPane.Chat -> (selectedThread ?: lastOpenedThread)?.takeIf { it.id == pane.threadId }?.let { thread ->
-                                        val screenModel = screenMapper.map(thread, messages, sims, composerState)
+                                        // Map messages only when the thread/messages/sims change (not on every
+                                        // composer keystroke); merge the live composer state with a cheap copy.
+                                        val screenModel = remember(thread, messages, sims) {
+                                            screenMapper.map(thread, messages, sims, SmsComposerState())
+                                        }.copy(composer = composerState)
                                         ConversationScreenContent(
                                             screen = screenModel,
                                             sims = sims,
@@ -815,7 +819,9 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                     modifier = Modifier.align(Alignment.TopCenter),
                 ) {
                     (selectedThread ?: lastOpenedThread)?.let { thread ->
-                        val headerSubtitle = screenMapper.map(thread, messages, sims, composerState).header.subtitle
+                        val headerSubtitle = remember(thread, messages.size, sims) {
+                            screenMapper.header(thread, messages.size, sims).subtitle
+                        }
                         ConversationTopBar(
                             thread = thread,
                             headerSubtitle = headerSubtitle,
