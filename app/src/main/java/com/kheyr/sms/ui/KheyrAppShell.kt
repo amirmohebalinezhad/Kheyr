@@ -334,7 +334,9 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                 duration = SnackbarDuration.Long,
             )
             if (result == SnackbarResult.ActionPerformed) {
-                pendingDelete = null
+                // Only clear the pending slot if it still belongs to THIS thread; a later overlapping
+                // delete may have taken the slot, and clearing it would drop that thread's deletion.
+                if (pendingDelete?.threadId == thread.id) pendingDelete = null
                 repository.restoreThreadMessages(snapshot)
                 refreshThreadsLocal()
             } else if (pendingDelete?.threadId == thread.id) {
