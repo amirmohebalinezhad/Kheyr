@@ -509,7 +509,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
     KheyrTheme(themePreference = themePreference) {
         Scaffold(
             snackbarHost = { SnackbarHost(snackbarHostState) },
-            containerColor = Color.Transparent,
+            containerColor = MaterialTheme.colorScheme.background,
         ) {
             Box(Modifier.fillMaxSize()) {
                 Box(Modifier.fillMaxSize()) {

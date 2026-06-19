@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -63,6 +64,8 @@ fun MessageBubbleContent(
         )
     }
 
+    val contentColor = LocalContentColor.current
+
     Column(bubbleModifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         if (emojiStyle) {
             Text(
@@ -70,6 +73,7 @@ fun MessageBubbleContent(
                 fontSize = 28.sp,
                 textAlign = TextAlign.Center,
                 style = MaterialTheme.typography.bodyLarge.copy(
+                    color = contentColor,
                     textDirection = MessageTextDirection.resolve(row.body),
                 ),
             )
@@ -79,7 +83,7 @@ fun MessageBubbleContent(
         Text(
             row.timeLabel,
             style = MaterialTheme.typography.labelSmall.copy(textDirection = TextDirection.Rtl),
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            color = contentColor.copy(alpha = 0.72f),
         )
         row.copyableCode?.let { code ->
             TextButton(

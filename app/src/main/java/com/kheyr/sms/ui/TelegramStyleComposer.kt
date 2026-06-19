@@ -69,22 +69,22 @@ fun TelegramStyleComposer(
                 val draftTextAlign = if (draftLayoutDirection == LayoutDirection.Rtl) TextAlign.Right else TextAlign.Left
                 Box(modifier = Modifier.weight(1f)) {
                     CompositionLocalProvider(LocalLayoutDirection provides draftLayoutDirection) {
-                        TextField(
-                            value = body,
-                            onValueChange = onBodyChange,
-                            modifier = Modifier.fillMaxWidth(),
-                            placeholder = { Text("Message") },
-                            minLines = 1,
-                            maxLines = 5,
-                            textStyle = MaterialTheme.typography.bodyLarge.copy(textAlign = draftTextAlign),
-                            shape = RoundedCornerShape(24.dp),
-                            colors = TextFieldDefaults.colors(
-                                focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
-                                focusedIndicatorColor = Color.Transparent,
-                                unfocusedIndicatorColor = Color.Transparent,
-                            ),
-                        )
+                TextField(
+                    value = body,
+                    onValueChange = onBodyChange,
+                    modifier = Modifier.weight(1f),
+                    placeholder = { Text("Message") },
+                    minLines = 1,
+                    maxLines = 5,
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(textAlign = draftTextAlign),
+                    shape = RoundedCornerShape(24.dp),
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainer,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                    ),
+                )
                     }
                 }
                 IconButton(

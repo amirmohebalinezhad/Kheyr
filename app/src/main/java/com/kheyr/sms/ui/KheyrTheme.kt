@@ -29,11 +29,13 @@ private val LightColorScheme = lightColorScheme(
     onPrimary = KheyrColors.OnPrimary,
     primaryContainer = KheyrColors.OutgoingBubbleLight,
     onPrimaryContainer = Color(0xFF003738),
-    surface = KheyrColors.GlassSurfaceLight,
+    surface = KheyrColors.SurfaceLight,
     onSurface = Color(0xFF1C1B1F),
-    surfaceVariant = KheyrColors.SearchFieldLight,
+    surfaceVariant = KheyrColors.SurfaceVariantLight,
     onSurfaceVariant = Color(0xFF49454F),
-    background = Color(0xFFF7F7F7),
+    surfaceContainer = KheyrColors.SurfaceContainerLight,
+    surfaceContainerHigh = KheyrColors.GlassSurfaceLight,
+    background = KheyrColors.BackgroundLight,
     onBackground = Color(0xFF1C1B1F),
 )
 
@@ -42,11 +44,13 @@ private val DarkColorScheme = darkColorScheme(
     onPrimary = KheyrColors.OnPrimary,
     primaryContainer = KheyrColors.OutgoingBubbleDark,
     onPrimaryContainer = Color(0xFFB8E8E9),
-    surface = KheyrColors.GlassSurfaceDark,
+    surface = KheyrColors.SurfaceDark,
     onSurface = Color(0xFFE6E1E5),
-    surfaceVariant = KheyrColors.SearchFieldDark,
+    surfaceVariant = KheyrColors.SurfaceVariantDark,
     onSurfaceVariant = Color(0xFFCAC4D0),
-    background = Color(0xFF121212),
+    surfaceContainer = KheyrColors.SurfaceContainerDark,
+    surfaceContainerHigh = KheyrColors.GlassSurfaceDark,
+    background = KheyrColors.BackgroundDark,
     onBackground = Color(0xFFE6E1E5),
 )
 
