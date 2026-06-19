@@ -194,14 +194,15 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
         inboxNavForward = true
         selectedThread = thread
         lastOpenedThread = thread
-        messages = emptyList()
         conversationSearchActive = false
         conversationSearchQuery = ""
         composerState = composerStateForThread(thread)
-        screen = AppScreen.Conversation
         scope.launch {
-            repository.markThreadRead(thread.id)
+            // Load the messages before switching screens so the conversation slides in already
+            // populated, instead of sliding in empty and popping the bubbles in a frame later.
             messages = repository.loadLocalMessages(thread.id)
+            screen = AppScreen.Conversation
+            repository.markThreadRead(thread.id)
         }
     }
 
