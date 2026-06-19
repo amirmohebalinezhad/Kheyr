@@ -22,6 +22,10 @@ object ComposerSimResolver {
         if (threadSubscriptionId == null) return null
         val available = sims.map { it.subscriptionId }.toSet()
         if (threadSubscriptionId in available) return threadSubscriptionId
-        return sims.firstOrNull { it.slotIndex == threadSubscriptionId }?.subscriptionId
+        // A stored subscriptionId that is no longer present (e.g. after a SIM swap) must not be
+        // reinterpreted as a slot index: a stale subscriptionId can coincidentally match a valid
+        // slotIndex and silently route the reply out the wrong SIM. Return null so the caller falls
+        // back to global/default routing.
+        return null
     }
 }

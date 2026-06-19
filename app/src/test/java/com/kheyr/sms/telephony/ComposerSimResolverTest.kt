@@ -13,8 +13,10 @@ class ComposerSimResolverTest {
     }
 
     @Test
-    fun mapsThreadSlotIndexToSubscriptionId() {
-        assertEquals(22, ComposerSimResolver.resolve(listOf(sim1, sim2), threadSubscriptionId = 1, globalSubscriptionId = 11))
+    fun doesNotReinterpretStaleSubscriptionIdAsSlotIndex() {
+        // 1 is not a current subscriptionId; it must NOT be treated as slotIndex 1 (sim2),
+        // which would silently misroute the SIM. It falls back to the global default instead.
+        assertEquals(11, ComposerSimResolver.resolve(listOf(sim1, sim2), threadSubscriptionId = 1, globalSubscriptionId = 11))
     }
 
     @Test
