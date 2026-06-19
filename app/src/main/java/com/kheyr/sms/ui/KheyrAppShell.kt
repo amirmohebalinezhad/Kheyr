@@ -649,14 +649,21 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                                 label = "inbox",
                             ) { pane ->
                                 when (pane) {
-                                    InboxPane.List -> ThreadFolderScreen(
-                                        threads = threads.filter { thread ->
-                                            threadListFilter.matches(thread) &&
-                                                run {
-                                                    val searchable = SearchableThread(thread.displayName, thread.address, thread.lastMessage)
-                                                    threadSearchMatcher.matches(searchable, searchQuery)
-                                                }
-                                        },
+                                    InboxPane.List -> {
+                                        // Filter once per (threads, filter, query) change instead of allocating a
+                                        // new filtered list + SearchableThread per row on every recomposition
+                                        // (e.g. selection toggles or snackbar show/hide).
+                                        val visibleThreads = remember(threads, threadListFilter, searchQuery) {
+                                            threads.filter { thread ->
+                                                threadListFilter.matches(thread) &&
+                                                    threadSearchMatcher.matches(
+                                                        SearchableThread(thread.displayName, thread.address, thread.lastMessage),
+                                                        searchQuery,
+                                                    )
+                                            }
+                                        }
+                                        ThreadFolderScreen(
+                                        threads = visibleThreads,
                                         folder = chatFolder.toThreadFolder(),
                                         showFilters = chatFolder == ChatFolder.All,
                                         threadListFilter = threadListFilter,
@@ -681,6 +688,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                                             else -> "No conversations yet"
                                         },
                                     )
+                                    }
                                     is InboxPane.Chat -> (selectedThread ?: lastOpenedThread)?.takeIf { it.id == pane.threadId }?.let { thread ->
                                         // Map messages only when the thread/messages/sims change (not on every
                                         // composer keystroke); merge the live composer state with a cheap copy.
