@@ -91,6 +91,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import com.kheyr.sms.util.JalaliDateFormatter
 import java.time.Instant
+import kotlin.math.roundToInt
 
 enum class AppScreen { Onboarding, Main, NewMessage, Conversation, SettingsDetail, DesktopSync, Help }
 
@@ -1505,7 +1506,9 @@ private fun SettingsDetailScreen(
             SettingsCategory.SpamProtection -> {
                 Text("Spam rules are downloaded from the server. Cached rules are used offline.")
                 Text("Auto-delete spam after (days, 0=never): $spamAutoDeleteDays")
-                Slider(value = spamAutoDeleteDays.toFloat(), onValueChange = { onSpamAutoDeleteChange(it.toInt()) }, valueRange = 0f..30f, steps = 30)
+                // steps is the count of points BETWEEN the ends, so 29 yields 31 integer ticks
+                // (0..30 at spacing 1.0); roundToInt avoids the truncation bias of toInt().
+                Slider(value = spamAutoDeleteDays.toFloat(), onValueChange = { onSpamAutoDeleteChange(it.roundToInt()) }, valueRange = 0f..30f, steps = 29)
             }
             SettingsCategory.DualSim -> sims.forEach { sim ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
