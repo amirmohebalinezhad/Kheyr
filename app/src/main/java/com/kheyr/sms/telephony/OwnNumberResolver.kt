@@ -1,7 +1,6 @@
 package com.kheyr.sms.telephony
 
 import android.content.Context
-import android.os.Build
 import android.telephony.SubscriptionManager
 import com.kheyr.sms.contacts.PhoneNumberNormalizer
 
@@ -22,12 +21,9 @@ class OwnNumberResolver(private val context: Context) {
             null
         }
         return activeSubscriptions.orEmpty().any { info ->
-            val own = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                info.number
-            } else {
-                @Suppress("DEPRECATION")
-                info.number
-            }
+            // READ_SMS (held as the default SMS app) authorizes getNumber() on all API levels.
+            @Suppress("DEPRECATION")
+            val own = info.number
             !own.isNullOrBlank() && PhoneNumberNormalizer.matches(own, number)
         }
     }
