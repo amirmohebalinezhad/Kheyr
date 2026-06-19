@@ -1,5 +1,6 @@
 package com.kheyr.sms.ui
 
+import com.kheyr.sms.telephony.SimCard
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -30,5 +31,14 @@ class SmsComposerStateReducerTest {
         assertFalse(failed.sending)
         assertEquals("retry", failed.body)
         assertEquals(ComposerError.SendFailed, failed.error)
+    }
+
+    @Test fun activeSimNumberLabelUsesSelectedSimSlotAndFallsBackToFirstAvailable() {
+        val sim1 = SimCard(subscriptionId = 11, slotIndex = 0, displayName = "Personal", carrierName = "A")
+        val sim2 = SimCard(subscriptionId = 22, slotIndex = 1, displayName = "Work", carrierName = "B")
+
+        assertEquals("2", activeSimNumberLabel(listOf(sim1, sim2), selectedSubscriptionId = 22))
+        assertEquals("1", activeSimNumberLabel(listOf(sim1, sim2), selectedSubscriptionId = 99))
+        assertEquals("SIM", activeSimNumberLabel(emptyList(), selectedSubscriptionId = null))
     }
 }
