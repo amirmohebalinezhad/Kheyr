@@ -638,8 +638,6 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                                             if (threadSelection.isSelectionMode) threadSelection = threadSelection.toggle(thread.id) else openConversation(thread)
                                         },
                                         onThreadLongPress = { thread -> threadSelection = threadSelection.select(thread.id) },
-                                        onThreadClick = { openConversation(it) },
-                                        onThreadLongPress = { showThreadMenu = it },
                                         listState = threadListState,
                                         emptyText = when {
                                             threadsLoading -> "Loading conversations..."
