@@ -35,9 +35,14 @@ class HeadlessSmsSendService : Service() {
             val repository = SmsRepository(this@HeadlessSmsSendService)
             val sender = SmsSender(this@HeadlessSmsSendService)
             val messageId = repository.persistOutgoing(recipient, body, null)
-            repository.markSending(messageId)
-            sender.send(com.kheyr.sms.telephony.SmsSendRequest(recipient, body, null, messageId))
-            stopSelf(startId)
+            try {
+                repository.markSending(messageId)
+                sender.send(com.kheyr.sms.telephony.SmsSendRequest(recipient, body, null, messageId))
+            } catch (t: Throwable) {
+                repository.markFailed(messageId)
+            } finally {
+                stopSelf(startId)
+            }
         }
         return START_NOT_STICKY
     }
