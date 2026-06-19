@@ -2,6 +2,12 @@ package com.kheyr.sms.domain
 
 class SpamScorer(private val ruleSet: SpamRuleSet) {
     fun score(sender: String, body: String, senderIsContact: Boolean): SpamScore {
+        val safeRule = ruleSet.rules.firstOrNull {
+            it.enabled && it.type == SpamRuleType.KnownSafeSender && matches(it, sender, body, senderIsContact)
+        }
+        if (safeRule != null) {
+            return SpamScore(0, listOf(safeRule.id), SpamClassification.Normal)
+        }
         var total = 0
         val triggered = mutableListOf<String>()
         ruleSet.rules.filter { it.enabled }.forEach { rule ->

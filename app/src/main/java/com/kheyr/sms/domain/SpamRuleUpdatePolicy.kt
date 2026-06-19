@@ -6,7 +6,11 @@ class SpamRuleUpdatePolicy {
         if (candidate.version <= (current?.version ?: 0)) return SpamRuleUpdateDecision.RejectOlderOrSameVersion
         if (candidate.threshold <= 0) return SpamRuleUpdateDecision.RejectInvalid("Threshold must be positive")
         if (candidate.rules.none { it.enabled }) return SpamRuleUpdateDecision.RejectInvalid("At least one enabled rule is required")
-        val invalidRule = candidate.rules.firstOrNull { it.id.isBlank() || it.score == 0 || it.requiresPattern() && it.pattern.isNullOrBlank() }
+        val invalidRule = candidate.rules.firstOrNull {
+            it.id.isBlank() ||
+                (it.score == 0 && it.type != SpamRuleType.KnownSafeSender) ||
+                it.requiresPattern() && it.pattern.isNullOrBlank()
+        }
         return if (invalidRule == null) SpamRuleUpdateDecision.Accept else SpamRuleUpdateDecision.RejectInvalid("Invalid rule: ${invalidRule.id}")
     }
 
