@@ -54,15 +54,17 @@ class SmsSendStatusReceiver : BroadcastReceiver() {
     ): Boolean {
         val key = progressKey(status, messageId)
         val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val deliveredParts = prefs.getStringSet(key, emptySet()).orEmpty().toMutableSet().apply {
-            add(partIndex.toString())
-        }
-        return if (deliveredParts.size >= partCount) {
-            prefs.edit().remove(key).apply()
-            true
-        } else {
-            prefs.edit().putStringSet(key, deliveredParts).apply()
-            false
+        synchronized(LOCK) {
+            val deliveredParts = prefs.getStringSet(key, emptySet()).orEmpty().toMutableSet().apply {
+                add(partIndex.toString())
+            }
+            return if (deliveredParts.size >= partCount) {
+                prefs.edit().remove(key).commit()
+                true
+            } else {
+                prefs.edit().putStringSet(key, deliveredParts).commit()
+                false
+            }
         }
     }
 
@@ -77,6 +79,9 @@ class SmsSendStatusReceiver : BroadcastReceiver() {
 
     companion object {
         private const val PREFS_NAME = "sms_send_status_parts"
+
+        /** Process-wide lock guarding the non-atomic part-progress read-modify-write. */
+        private val LOCK = Any()
     }
 }
 
