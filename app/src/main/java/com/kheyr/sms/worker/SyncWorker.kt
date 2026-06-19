@@ -11,10 +11,11 @@ import com.kheyr.sms.reliability.BackgroundSyncScheduler
 import com.kheyr.sms.spam.SpamRuleDownloader
 import com.kheyr.sms.sync.RoomSyncQueueStore
 import com.kheyr.sms.sync.SyncDownloader
+import com.kheyr.sms.sync.SyncEncryptionKeyStore
 import com.kheyr.sms.sync.SyncUploader
 import com.kheyr.sms.sync.crypto.SmsBodyEncryptor
 import java.time.Instant
-import javax.crypto.spec.SecretKeySpec
+import javax.crypto.SecretKey
 
 class SyncWorker(appContext: Context, params: WorkerParameters) : CoroutineWorker(appContext, params) {
     override suspend fun doWork(): Result {
@@ -24,7 +25,9 @@ class SyncWorker(appContext: Context, params: WorkerParameters) : CoroutineWorke
 
         val api = KheyrApiService(tokenProvider = { preferences.authTokens().first })
         val queueStore = RoomSyncQueueStore(AppDatabase.getInstance(applicationContext).syncQueueDao())
-        val encryptor = SmsBodyEncryptor(SecretKeySpec(ByteArray(32) { 1 }, "AES"))
+        val encryptionKey: SecretKey = runCatching { SyncEncryptionKeyStore.getOrCreateKey() }
+            .getOrElse { return Result.retry() }
+        val encryptor = SmsBodyEncryptor(encryptionKey)
         val uploader = SyncUploader({ syncSettings }, queueStore, api, encryptor)
         uploader.uploadPending()
         // Only record success for upload-capable runs. When sync is enabled but the device is not yet
