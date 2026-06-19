@@ -87,6 +87,7 @@ import com.kheyr.sms.thread.SearchableThread
 import com.kheyr.sms.worker.KheyrWorkerScheduler
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import com.kheyr.sms.util.JalaliDateFormatter
 import java.time.Instant
@@ -119,6 +120,9 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
     val threadSearchMatcher = remember { ThreadSearchMatcher() }
     val conversationSearchMatcher = remember { ConversationSearchMatcher() }
     val scope = rememberCoroutineScope()
+    // All thread-list reloads run through this single job; starting a new one cancels the previous
+    // so concurrent loads can't land out of order or clobber an optimistic update.
+    val reloadJob = remember { mutableStateOf<Job?>(null) }
 
     var screen by remember { mutableStateOf(if (preferences.onboardingComplete) AppScreen.Main else AppScreen.Onboarding) }
     var selectedTab by remember { mutableStateOf(MainTab.Chats) }
@@ -298,9 +302,16 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
         }
     }
 
+    // Serializes thread reloads: cancels any in-flight reload before launching the next, so the
+    // last requested reload is the one that writes `threads`.
+    fun launchThreadReload(block: suspend () -> Unit) {
+        reloadJob.value?.cancel()
+        reloadJob.value = scope.launch { block() }
+    }
+
     fun refreshThreadsLocal() {
         if (!smsPermissionGranted) return
-        scope.launch {
+        launchThreadReload {
             threads = loadThreadsForFolder()
         }
     }
@@ -399,7 +410,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
 
     fun syncThreadsInBackground() {
         if (!smsPermissionGranted) return
-        scope.launch {
+        launchThreadReload {
             repository.syncTelephonyMessages()
             threads = loadThreadsForFolder()
         }
@@ -407,7 +418,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
 
     fun refreshThreads() {
         if (!smsPermissionGranted) return
-        scope.launch {
+        launchThreadReload {
             threadsLoading = threads.isEmpty()
             try {
                 threads = loadThreadsForFolder()
@@ -463,8 +474,13 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
 
     LaunchedEffect(chatFolder, screen, selectedTab) {
         if (screen == AppScreen.Main && selectedTab == MainTab.Chats) {
-            refreshThreadsLocal()
-            syncThreadsInBackground()
+            // One sequenced reload (quick local load, then sync, then reload) instead of two
+            // concurrent launches that raced to assign `threads`.
+            launchThreadReload {
+                threads = loadThreadsForFolder()
+                repository.syncTelephonyMessages()
+                threads = loadThreadsForFolder()
+            }
         }
     }
 
