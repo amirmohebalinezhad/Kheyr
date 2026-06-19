@@ -71,7 +71,9 @@ sealed interface SyncEventDto
 data class EncryptedSmsMessageDto(
     val messageId: Long,
     val threadId: Long,
-    val address: String,
+    // Salted SHA-256 of the counterpart phone number (per EncryptedFieldPolicy "address" is protected).
+    // The raw address is never placed on the wire; the backend can still group/match by counterpart.
+    val hashedAddress: String,
     val encryptedBody: EncryptedSmsBody,
     val timestamp: Instant,
     val direction: MessageDirection,

@@ -30,12 +30,16 @@ class SyncUploader(
             return 0
         }
 
+        // EncryptedFieldPolicy marks "address" as protected, so the recipient number is salted-hashed
+        // (never sent in cleartext). The device id is a stable per-install salt source.
+        val addressHasher = PhoneIdentifierHasher(settings.deviceId!!)
+
         val records = queueStore.pendingRecords(limit)
         val skippedDeletedBackfillIds = records
             .filterIsInstance<InitialBackfillSyncRecord>()
             .filter { it.locallyDeletedBeforeSync }
             .map { it.queueId }
-        val payloads = records.mapNotNull(::toUploadDto)
+        val payloads = records.mapNotNull { toUploadDto(it, addressHasher) }
         if (payloads.isEmpty()) {
             if (skippedDeletedBackfillIds.isNotEmpty()) queueStore.markUploaded(skippedDeletedBackfillIds)
             return 0
@@ -47,11 +51,11 @@ class SyncUploader(
         return payloads.size
     }
 
-    private fun toUploadDto(record: SyncQueueRecord): SyncUploadDto? = when (record) {
+    private fun toUploadDto(record: SyncQueueRecord, addressHasher: PhoneIdentifierHasher): SyncUploadDto? = when (record) {
         is InitialBackfillSyncRecord -> {
-            if (record.locallyDeletedBeforeSync) null else encryptedMessage(record.queueId, record.message)
+            if (record.locallyDeletedBeforeSync) null else encryptedMessage(record.queueId, record.message, addressHasher)
         }
-        is MessageChangeSyncRecord -> encryptedMessage(record.queueId, record.message)
+        is MessageChangeSyncRecord -> encryptedMessage(record.queueId, record.message, addressHasher)
         is DeleteEventSyncRecord -> SyncUploadDto(record.queueId, DeleteEventDto(record.messageId, record.deletedAt))
         is SpamStatusSyncRecord -> SyncUploadDto(record.queueId, SpamStatusDto(record.threadId, record.isSpam))
         is PinnedStatusSyncRecord -> SyncUploadDto(record.queueId, PinnedStatusDto(record.threadId, record.isPinned, record.pinnedAt))
@@ -66,12 +70,12 @@ class SyncUploader(
         )
     }
 
-    private fun encryptedMessage(queueId: Long, message: SmsMessage): SyncUploadDto = SyncUploadDto(
+    private fun encryptedMessage(queueId: Long, message: SmsMessage, addressHasher: PhoneIdentifierHasher): SyncUploadDto = SyncUploadDto(
         queueId = queueId,
         event = EncryptedSmsMessageDto(
             messageId = message.id,
             threadId = message.threadId,
-            address = message.address,
+            hashedAddress = addressHasher.hash(message.address),
             encryptedBody = encryptor.encryptBody(message.body),
             timestamp = message.timestamp,
             direction = message.direction,
