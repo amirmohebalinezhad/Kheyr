@@ -17,6 +17,16 @@ class OtpDetectorTest {
     }
 
     @Test
+    fun findsStandaloneArabicIndicCode() {
+        assertEquals("1234", OtpDetector.findCopyableCode("Use ١٢٣٤ to login"))
+    }
+
+    @Test
+    fun findsStandalonePersianCode() {
+        assertEquals("9876", OtpDetector.findCopyableCode("ورود با ۹۸۷۶"))
+    }
+
+    @Test
     fun ignoresMultipleCodes() {
         assertNull(OtpDetector.findCopyableCode("Codes 1234 and 5678 are invalid"))
     }

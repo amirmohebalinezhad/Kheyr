@@ -20,6 +20,13 @@ class MessageLinkDetectorTest {
     }
 
     @Test
+    fun trimsLocalizedTrailingPunctuation() {
+        val links = MessageLinkDetector.findAll("لینک https://example.com،")
+        assertEquals(1, links.size)
+        assertEquals("https://example.com", links.first().url)
+    }
+
+    @Test
     fun findsBareDomainWithPath() {
         val links = MessageLinkDetector.findAll("Open example.com/foo/bar for details")
         assertEquals(1, links.size)

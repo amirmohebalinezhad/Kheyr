@@ -183,6 +183,11 @@ class SmsRepository(
     suspend fun deleteThreadMessages(threadId: Long) =
         withContext(Dispatchers.IO) { smsDao.deleteThreadMessages(threadId) }
 
+    suspend fun deleteMessagesByIds(ids: List<Long>) = withContext(Dispatchers.IO) {
+        if (ids.isEmpty()) return@withContext
+        smsDao.deleteMessagesByIds(ids)
+    }
+
     suspend fun loadLocalMessageEntities(threadId: Long): List<SmsMessageEntity> = withContext(Dispatchers.IO) {
         smsDao.messagesForThread(threadId)
     }

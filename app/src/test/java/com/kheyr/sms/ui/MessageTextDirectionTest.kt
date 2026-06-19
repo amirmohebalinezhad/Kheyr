@@ -31,6 +31,18 @@ class MessageTextDirectionTest {
     }
 
     @Test
+    fun fallsBackForPersianDigitsOnlyText() {
+        assertEquals(TextDirection.Content, MessageTextDirection.resolve("۱۲۳۴۵"))
+        assertEquals(LayoutDirection.Ltr, MessageTextDirection.resolveLayoutDirection("۱۲۳۴۵", LayoutDirection.Ltr))
+    }
+
+    @Test
+    fun resolvesLtrForEnglishPrefixedWithArabicPunctuation() {
+        assertEquals(TextDirection.Ltr, MessageTextDirection.resolve("، Hello"))
+        assertEquals(LayoutDirection.Ltr, MessageTextDirection.resolveLayoutDirection("، Hello", LayoutDirection.Rtl))
+    }
+
+    @Test
     fun fallsBackForEmojiOnlyText() {
         assertEquals(TextDirection.Content, MessageTextDirection.resolve("🙂🎉"))
         assertEquals(LayoutDirection.Ltr, MessageTextDirection.resolveLayoutDirection("🙂🎉", LayoutDirection.Ltr))

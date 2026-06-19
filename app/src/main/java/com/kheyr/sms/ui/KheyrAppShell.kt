@@ -93,6 +93,10 @@ private sealed interface InboxPane {
     data class Chat(val threadId: Long) : InboxPane
 }
 
+// Captures exactly which messages a deferred delete should remove. Deleting by the snapshot's ids
+// (instead of the whole thread) means messages that arrive while the undo snackbar is visible survive.
+private data class PendingThreadDelete(val threadId: Long, val messageIds: List<Long>)
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {}) {
@@ -166,7 +170,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
     var statusMessage by remember { mutableStateOf<String?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
     var inboxNavForward by remember { mutableStateOf(true) }
-    var pendingDeleteThreadId by remember { mutableStateOf<Long?>(null) }
+    var pendingDelete by remember { mutableStateOf<PendingThreadDelete?>(null) }
     var threadSelection by remember { mutableStateOf(ThreadSelectionState()) }
     val threadListState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
     val contactsListState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
@@ -291,9 +295,10 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
     }
 
     suspend fun commitPendingDelete() {
-        val threadId = pendingDeleteThreadId ?: return
-        pendingDeleteThreadId = null
-        repository.deleteThreadMessages(threadId)
+        val pending = pendingDelete ?: return
+        pendingDelete = null
+        // Delete only the messages captured at delete time, leaving any that arrived during the undo window.
+        repository.deleteMessagesByIds(pending.messageIds)
     }
 
     fun deleteThreadWithUndo(thread: SmsThread) {
@@ -301,7 +306,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
             commitPendingDelete()
             val folder = chatFolder.toThreadFolder()
             val snapshot = repository.loadLocalMessageEntities(thread.id)
-            pendingDeleteThreadId = thread.id
+            pendingDelete = PendingThreadDelete(thread.id, snapshot.map { it.id })
             threads = ThreadListOptimisticUpdate.applyAction(threads, thread, ThreadBulkAction.Delete)
             threads = ThreadListOptimisticUpdate.filterForFolder(threads, folder)
             if (selectedThread?.id == thread.id) {
@@ -313,10 +318,10 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                 duration = SnackbarDuration.Long,
             )
             if (result == SnackbarResult.ActionPerformed) {
-                pendingDeleteThreadId = null
+                pendingDelete = null
                 repository.restoreThreadMessages(snapshot)
                 refreshThreadsLocal()
-            } else if (pendingDeleteThreadId == thread.id) {
+            } else if (pendingDelete?.threadId == thread.id) {
                 commitPendingDelete()
             }
         }
@@ -330,8 +335,18 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
         if (!request.isRunnable) return
         val selectedThreads = selectedThreadsForAction()
         val folder = chatFolder.toThreadFolder()
+        // Bulk Archive/Mark spam/Mute apply one consistent target state across the whole selection
+        // (mirroring bulk pin) instead of flipping each thread from its own state, which would do the
+        // opposite for some rows in a mixed selection. Only turn the state off when every selected
+        // thread already has it on.
+        val target: Boolean? = when (action) {
+            ThreadBulkAction.Archive -> !selectedThreads.all { it.isArchived }
+            ThreadBulkAction.MarkSpam -> !selectedThreads.all { it.isSpam }
+            ThreadBulkAction.Mute -> !selectedThreads.all { it.isMuted }
+            else -> null
+        }
         threads = selectedThreads.fold(threads) { current, thread ->
-            ThreadListOptimisticUpdate.applyAction(current, thread, action)
+            ThreadListOptimisticUpdate.applyAction(current, thread, action, target)
         }
         threads = ThreadListOptimisticUpdate.filterForFolder(threads, folder)
         threadSelection = threadSelection.clear()
@@ -339,9 +354,9 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
             selectedThreads.forEach { thread ->
                 when (action) {
                     ThreadBulkAction.MarkRead -> repository.markThreadRead(thread.id)
-                    ThreadBulkAction.Archive -> repository.updateArchived(thread.id, !thread.isArchived)
-                    ThreadBulkAction.MarkSpam -> repository.updateSpam(thread.id, !thread.isSpam)
-                    ThreadBulkAction.Mute -> repository.updateMuted(thread.id, !thread.isMuted)
+                    ThreadBulkAction.Archive -> repository.updateArchived(thread.id, target ?: !thread.isArchived)
+                    ThreadBulkAction.MarkSpam -> repository.updateSpam(thread.id, target ?: !thread.isSpam)
+                    ThreadBulkAction.Mute -> repository.updateMuted(thread.id, target ?: !thread.isMuted)
                     ThreadBulkAction.Delete -> repository.deleteThreadMessages(thread.id)
                 }
             }
@@ -661,8 +676,10 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                                             onBodyChange = { composerState = composerReducer.reduce(composerState, SmsComposerEvent.BodyChanged(it)) },
                                             onSimSelected = { composerState = composerReducer.reduce(composerState, SmsComposerEvent.SubscriptionSelected(it)) },
                                             onSend = {
-                                                val subscriptionId = resolvedComposerSim(thread)
-                                                    ?: composerState.selectedSubscriptionId
+                                                // Honor the SIM the user picked in the composer; only fall
+                                                // back to the resolver when nothing has been selected.
+                                                val subscriptionId = composerState.selectedSubscriptionId
+                                                    ?: resolvedComposerSim(thread)
                                                 if (subscriptionId == null) {
                                                     composerState = composerState.copy(error = ComposerError.MissingSimSelection)
                                                     return@ConversationScreenContent
@@ -798,6 +815,9 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                         onTabSelected = { tab ->
                             selectedTab = tab
                             settingsCategory = null
+                            // Selection UI is only shown on the Chats tab; clear it when leaving so the
+                            // back handler doesn't swallow Back to dismiss an invisible selection.
+                            threadSelection = threadSelection.clear()
                         },
                         modifier = Modifier
                             .align(Alignment.BottomCenter)

@@ -242,6 +242,9 @@ interface SmsDao {
     @Query("DELETE FROM messages WHERE threadId = :threadId")
     fun deleteThreadMessages(threadId: Long)
 
+    @Query("DELETE FROM messages WHERE id IN (:ids)")
+    fun deleteMessagesByIds(ids: List<Long>)
+
     @Query("SELECT COALESCE(s.isMuted, 0) FROM thread_state s WHERE s.threadId = :threadId")
     fun isThreadMuted(threadId: Long): Boolean?
 

@@ -27,7 +27,8 @@ class NewMessageViewModel(
             allContacts.filter { contact ->
                 contact.displayName.contains(trimmed, ignoreCase = true) ||
                     contact.phoneNumber.contains(trimmed, ignoreCase = true) ||
-                    PhoneNumberNormalizer.normalize(contact.phoneNumber).contains(normalizedQuery)
+                    (normalizedQuery.isNotEmpty() &&
+                        PhoneNumberNormalizer.normalize(contact.phoneNumber).contains(normalizedQuery))
             }
         }
         return NewMessageUiState(

@@ -10,7 +10,9 @@ object MessageLinkDetector {
     private val urlPattern = Regex("""(?i)(https?://[^\s<>"']+|www\.[^\s<>"']+)""")
     // example.com, api.example.com, site.my-site.io, with optional /path
     private val bareDomainPattern = Regex("""(?i)([a-z0-9][a-z0-9.\-]*\.[a-z]{2,6})(?:/[^\s<>"']+)?""")
-    private val trailingPunctuation = Regex("""[.,;:!?)}\]"']+$""")
+    // Includes localized terminal punctuation (Arabic/Persian comma ،, semicolon ؛, question mark ؟)
+    // so links followed by them in RTL messages do not capture the punctuation into the URL.
+    private val trailingPunctuation = Regex("""[.,;:!?)}\]"'،؛؟]+$""")
 
     fun findAll(text: String): List<MessageLink> {
         val links = mutableListOf<MessageLink>()

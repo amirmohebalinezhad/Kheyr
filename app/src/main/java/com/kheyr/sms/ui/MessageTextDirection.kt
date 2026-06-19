@@ -31,13 +31,18 @@ object MessageTextDirection {
         return null
     }
 
+    // Only strong RTL letters should determine first-strong direction. Weak characters that live in
+    // these blocks (e.g. Persian/Arabic digits ۰-۹ or punctuation like ، ؟) must fall through so a
+    // number-only draft falls back and a punctuation-prefixed English draft resolves LTR.
     private fun Int.isRtlScriptCodePoint(): Boolean =
-        this in 0x0590..0x05FF || // Hebrew
+        Character.isLetter(this) && (
+            this in 0x0590..0x05FF || // Hebrew
             this in 0x0600..0x06FF || // Arabic, Persian, Urdu
             this in 0x0750..0x077F || // Arabic Supplement
             this in 0x08A0..0x08FF || // Arabic Extended-A
             this in 0xFB1D..0xFDFF || // Hebrew/Arabic presentation forms
             this in 0xFE70..0xFEFF // Arabic Presentation Forms-B
+            )
 
     private fun Int.isRtlDirectionality(): Boolean =
         Character.getDirectionality(this) == Character.DIRECTIONALITY_RIGHT_TO_LEFT ||
