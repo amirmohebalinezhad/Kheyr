@@ -1254,11 +1254,14 @@ private fun ThreadFolderScreen(
                 contentPadding = PaddingValues(bottom = bottomInset),
             ) {
                 items(threads, key = { it.id }) { thread ->
-                    val row = mapper.map(thread, folder, sims)
+                    // Memoize the pure presentation/date derivations so they don't recompute on every
+                    // row recomposition (e.g. toggling multi-select, which changes selectedThreadIds).
+                    val row = remember(thread, folder, sims) { mapper.map(thread, folder, sims) }
+                    val timeLabel = remember(thread.lastMessageAt) { formatMessageTime(thread.lastMessageAt) }
                     TelegramStyleThreadRow(
                         title = row.title,
                         preview = row.preview,
-                        timeLabel = formatMessageTime(thread.lastMessageAt),
+                        timeLabel = timeLabel,
                         photoUri = thread.contactPhotoUri,
                         unreadBadge = row.unreadBadge,
                         showPinned = row.showPinned,
