@@ -35,4 +35,12 @@ data class EncryptedSmsBody(
     val algorithm: String,
     val nonceBase64: String,
     val ciphertextBase64: String,
-)
+) {
+    /**
+     * Self-describing wire form "algorithm.nonceBase64.ciphertextBase64". The GCM nonce MUST travel
+     * with the ciphertext or no receiving device can decrypt. Standard base64 never contains '.', so
+     * it is a safe delimiter; the zero-knowledge backend stores this blob opaquely and the decrypting
+     * device (e.g. a paired desktop) splits it back into its three parts.
+     */
+    fun wireFormat(): String = "$algorithm.$nonceBase64.$ciphertextBase64"
+}

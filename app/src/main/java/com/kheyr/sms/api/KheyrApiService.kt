@@ -106,7 +106,9 @@ class KheyrApiService(
             put("type", "message_created")
             put("message_id", event.messageId)
             put("thread_id", event.threadId)
-            put("encrypted_body", event.encryptedBody.ciphertextBase64)
+            // Send the full envelope (algorithm + nonce + ciphertext); the nonce is required to
+            // decrypt and was previously dropped, making every synced body undecryptable.
+            put("encrypted_body", event.encryptedBody.wireFormat())
         }
         is com.kheyr.sms.sync.DeleteEventDto -> JSONObject().apply {
             put("type", "message_deleted")
