@@ -317,7 +317,12 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
             commitPendingDelete()
             val folder = chatFolder.toThreadFolder()
             val snapshot = repository.loadLocalMessageEntities(thread.id)
-            pendingDelete = PendingThreadDelete(thread.id, snapshot.map { it.id })
+            val snapshotIds = snapshot.map { it.id }
+            pendingDelete = PendingThreadDelete(thread.id, snapshotIds)
+            // Delete the snapshot rows now so the optimistic removal matches persisted state. Only
+            // these ids are removed, so messages that arrive during the undo window survive; Undo
+            // re-inserts the snapshot as the sole copies instead of duplicating still-present rows.
+            repository.deleteMessagesByIds(snapshotIds)
             threads = ThreadListOptimisticUpdate.applyAction(threads, thread, ThreadBulkAction.Delete)
             threads = ThreadListOptimisticUpdate.filterForFolder(threads, folder)
             if (selectedThread?.id == thread.id) {
