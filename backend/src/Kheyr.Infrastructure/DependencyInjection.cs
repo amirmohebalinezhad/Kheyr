@@ -19,7 +19,7 @@ public static class DependencyInjection
             if (useSqlite)
                 options.UseSqlite(connectionString);
             else
-                options.UseNpgsql(connectionString);
+                options.UseSqlServer(connectionString);
         });
 
         services.AddScoped<TokenService>();

@@ -8,7 +8,7 @@ var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddKheyrOptions(builder.Configuration);
 var connectionString = builder.Configuration.GetConnectionString("Default") ?? "Data Source=kheyr-admin.db";
-var useSqlite = builder.Configuration.GetValue("Database:UseSqlite", true);
+var useSqlite = builder.Configuration.GetValue("Database:UseSqlite", false);
 builder.Services.AddKheyrInfrastructure(connectionString, useSqlite);
 
 builder.Services.AddAuthentication(CookieAuthenticationDefaults.AuthenticationScheme)
