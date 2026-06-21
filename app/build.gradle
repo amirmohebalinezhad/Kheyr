@@ -40,7 +40,7 @@ android {
         versionCode 1
         versionName '0.1.0'
         testInstrumentationRunner 'androidx.test.runner.AndroidJUnitRunner'
-        buildConfigField 'String', 'API_BASE_URL', '"https://YOUR-BASE-URL.example.com"'
+        buildConfigField 'String', 'API_BASE_URL', '"https://api.kheyrsms.ir"'
 
         javaCompileOptions {
             annotationProcessorOptions {
