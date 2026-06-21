@@ -55,7 +55,7 @@ public class DatabaseInitializer(IServiceScopeFactory scopeFactory) : IHostedSer
     {
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<KheyrDbContext>();
-        await db.Database.EnsureCreatedAsync(cancellationToken);
+        await db.Database.MigrateAsync(cancellationToken);
         await SeedData.SeedAsync(db, cancellationToken);
     }
 

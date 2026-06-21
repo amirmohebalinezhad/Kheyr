@@ -2,6 +2,7 @@ using Kheyr.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using ThreadEntity = Kheyr.Domain.Entities.Thread;
+using DeleteBehavior = Microsoft.EntityFrameworkCore.DeleteBehavior;
 
 namespace Kheyr.Infrastructure.Data;
 
@@ -49,7 +50,7 @@ public class KheyrDbContext(DbContextOptions<KheyrDbContext> options) : DbContex
         {
             entity.HasKey(x => x.Id);
             entity.HasOne(x => x.User).WithMany(x => x.Messages).HasForeignKey(x => x.UserId);
-            entity.HasOne(x => x.Thread).WithMany(x => x.Messages).HasForeignKey(x => x.ThreadId);
+            entity.HasOne(x => x.Thread).WithMany(x => x.Messages).HasForeignKey(x => x.ThreadId).OnDelete(DeleteBehavior.NoAction);
             entity.HasIndex(x => new { x.UserId, x.ClientMessageId }).IsUnique();
         });
 
@@ -63,6 +64,8 @@ public class KheyrDbContext(DbContextOptions<KheyrDbContext> options) : DbContex
         modelBuilder.Entity<SyncCursor>(entity =>
         {
             entity.HasKey(x => x.Id);
+            entity.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId);
+            entity.HasOne(x => x.Device).WithMany().HasForeignKey(x => x.DeviceId).OnDelete(DeleteBehavior.NoAction);
             entity.HasIndex(x => new { x.UserId, x.DeviceId }).IsUnique();
         });
 
@@ -94,6 +97,8 @@ public class KheyrDbContext(DbContextOptions<KheyrDbContext> options) : DbContex
         modelBuilder.Entity<RefreshToken>(entity =>
         {
             entity.HasKey(x => x.Id);
+            entity.HasOne(x => x.User).WithMany().HasForeignKey(x => x.UserId);
+            entity.HasOne(x => x.Device).WithMany().HasForeignKey(x => x.DeviceId).OnDelete(DeleteBehavior.NoAction);
             entity.HasIndex(x => x.TokenHash).IsUnique();
         });
 
