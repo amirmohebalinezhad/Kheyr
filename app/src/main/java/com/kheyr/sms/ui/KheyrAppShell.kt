@@ -94,6 +94,7 @@ import com.kheyr.sms.telephony.SimCard
 import com.kheyr.sms.telephony.SimRepository
 import com.kheyr.sms.telephony.SmsSendRequest
 import com.kheyr.sms.telephony.SmsSender
+import com.kheyr.sms.telephony.ThreadIdResolver
 import com.kheyr.sms.thread.ThreadBulkAction
 import com.kheyr.sms.thread.ThreadSearchMatcher
 import com.kheyr.sms.thread.SearchableThread
@@ -264,7 +265,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
 
     fun openConversationForRecipient(recipient: NewMessageRecipient) {
         val existing = threads.firstOrNull { contactRepository.matchesAddress(it.address, recipient.address) }
-        val threadId = existing?.id ?: Telephony.Threads.getOrCreateThreadId(context, setOf(recipient.address))
+        val threadId = existing?.id ?: ThreadIdResolver.getOrCreateThreadId(context, recipient.address)
         openConversation(
             existing?.copy(displayName = recipient.displayName.ifBlank { existing.displayName }, contactPhotoUri = recipient.photoUri ?: existing.contactPhotoUri)
                 ?: SmsThread(
@@ -524,11 +525,15 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
     LaunchedEffect(chatFolder, screen, selectedTab) {
         if (screen == AppScreen.Main && selectedTab == MainTab.Chats) {
             // One sequenced reload (quick local load, then sync, then reload) instead of two
-            // concurrent launches that raced to assign `threads`.
+            // concurrent launches that raced to assign `threads`. The telephony sync reads the SMS
+            // provider, so it is gated on SMS permission — otherwise a revoked READ_SMS (e.g. after
+            // the user changes the default SMS app) would throw SecurityException here and crash on open.
             launchThreadReload {
                 threads = loadThreadsForFolder()
-                repository.syncTelephonyMessages()
-                threads = loadThreadsForFolder()
+                if (smsPermissionGranted) {
+                    repository.syncTelephonyMessages()
+                    threads = loadThreadsForFolder()
+                }
             }
         }
     }
@@ -841,15 +846,26 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                                                 val state = composerReducer.reduce(readyState, SmsComposerEvent.SendRequested)
                                                 composerState = state
                                                 if (state.error != null) return@ConversationScreenContent
+                                                if (!isDefaultSms) {
+                                                    // A non-default SMS app can't write to the system SMS store, so the
+                                                    // send would throw. Guide the user back to the role instead of crashing.
+                                                    statusMessage = "Set Kheyr as your default SMS app to send messages."
+                                                    return@ConversationScreenContent
+                                                }
                                                 val text = state.body.trim()
                                                 scope.launch {
-                                                    val telephonyId = repository.persistOutgoing(thread.address, text, subscriptionId)
-                                                    repository.markSending(telephonyId)
-                                                    repository.syncTelephonyMessagesByIds(listOf(telephonyId))
-                                                    sender.send(SmsSendRequest(thread.address, text, subscriptionId, telephonyId))
-                                                    composerState = composerReducer.reduce(state, SmsComposerEvent.SendCompleted)
-                                                    messages = repository.loadLocalMessages(thread.id)
-                                                    refreshThreadsLocal()
+                                                    try {
+                                                        val telephonyId = repository.persistOutgoing(thread.address, text, subscriptionId)
+                                                        repository.markSending(telephonyId)
+                                                        repository.syncTelephonyMessagesByIds(listOf(telephonyId))
+                                                        sender.send(SmsSendRequest(thread.address, text, subscriptionId, telephonyId))
+                                                        composerState = composerReducer.reduce(state, SmsComposerEvent.SendCompleted)
+                                                        messages = repository.loadLocalMessages(thread.id)
+                                                        refreshThreadsLocal()
+                                                    } catch (t: Exception) {
+                                                        if (t is kotlinx.coroutines.CancellationException) throw t
+                                                        statusMessage = "Couldn't send the message. Make sure Kheyr is your default SMS app."
+                                                    }
                                                 }
                                             },
                                             onRetry = { messageId ->

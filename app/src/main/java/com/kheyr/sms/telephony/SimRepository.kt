@@ -15,7 +15,15 @@ class SimRepository(private val context: Context) {
             return emptyList()
         }
         val manager = context.getSystemService(SubscriptionManager::class.java) ?: return emptyList()
-        return manager.activeSubscriptionInfoList.orEmpty().map { info ->
+        // Reading the subscription list / number can throw SecurityException when the privileged
+        // access granted to the default SMS app is withdrawn (e.g. the user switched default apps).
+        // Degrade to "no SIMs" instead of crashing on resume — mirrors OwnNumberResolver.
+        val subscriptions = try {
+            manager.activeSubscriptionInfoList
+        } catch (_: SecurityException) {
+            return emptyList()
+        }
+        return subscriptions.orEmpty().map { info ->
             SimCard(
                 subscriptionId = info.subscriptionId,
                 slotIndex = info.simSlotIndex,

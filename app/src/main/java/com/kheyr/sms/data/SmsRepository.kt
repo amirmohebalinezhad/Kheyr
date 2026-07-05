@@ -129,13 +129,20 @@ class SmsRepository(
             Telephony.Sms.STATUS,
             SUBSCRIPTION_ID,
         )
-        context.contentResolver.query(
-            Telephony.Sms.CONTENT_URI,
-            projection,
-            selection,
-            selectionArgs,
-            "${Telephony.Sms._ID} ASC",
-        )?.use { cursor ->
+        val cursor = try {
+            context.contentResolver.query(
+                Telephony.Sms.CONTENT_URI,
+                projection,
+                selection,
+                selectionArgs,
+                "${Telephony.Sms._ID} ASC",
+            )
+        } catch (_: SecurityException) {
+            // READ_SMS can be withdrawn when the app is no longer the default SMS handler. Keep the
+            // already-synced local data instead of crashing the caller.
+            return
+        }
+        cursor?.use { cursor ->
             val id = cursor.getColumnIndexOrThrow(Telephony.Sms._ID)
             val thread = cursor.getColumnIndexOrThrow(Telephony.Sms.THREAD_ID)
             val address = cursor.getColumnIndexOrThrow(Telephony.Sms.ADDRESS)

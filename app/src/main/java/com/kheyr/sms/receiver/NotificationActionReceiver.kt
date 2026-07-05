@@ -3,6 +3,7 @@ package com.kheyr.sms.receiver
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.util.Log
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.RemoteInput
 import com.kheyr.sms.data.SmsRefreshEvents
@@ -47,6 +48,11 @@ class NotificationActionReceiver : BroadcastReceiver() {
                     }
                 }
                 NotificationManagerCompat.from(appContext).cancel(notificationId)
+            } catch (t: Throwable) {
+                // Sending/recording requires being the default SMS app; if the user has since changed
+                // it, the provider write throws. Log instead of crashing the process from a background
+                // broadcast thread.
+                Log.e("NotificationAction", "Failed to handle notification action", t)
             } finally {
                 pendingResult.finish()
             }

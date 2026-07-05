@@ -92,10 +92,16 @@ class ContactRepository(private val context: Context) {
 
     fun matchesAddress(first: String, second: String): Boolean = PhoneNumberNormalizer.matches(first, second)
 
-    internal fun lookupProfileInIndex(profileIndex: Map<String, ContactProfile>, address: String): ContactProfile? =
-        profileIndex[address]
-            ?: profileIndex[PhoneNumberNormalizer.normalize(address)]
-            ?: profileIndex[PhoneNumberNormalizer.matchKey(address)]
+    internal fun lookupProfileInIndex(profileIndex: Map<String, ContactProfile>, address: String): ContactProfile? {
+        profileIndex[address]?.let { return it }
+        // Never fall back on a blank key: an empty normalized/match key would collide with the
+        // blank-keyed entries an alphanumeric sender collapses to, mislabeling unrelated threads.
+        val normalized = PhoneNumberNormalizer.normalize(address)
+        if (normalized.isNotBlank()) profileIndex[normalized]?.let { return it }
+        val key = PhoneNumberNormalizer.matchKey(address)
+        if (key.isNotBlank()) profileIndex[key]?.let { return it }
+        return null
+    }
 
     private data class CachedContactData(
         val nameIndex: Map<String, String>,
@@ -138,12 +144,13 @@ class ContactRepository(private val context: Context) {
                     photoUri = photoByContactId[contactId],
                     contactId = contactId,
                 )
-                nameIndex.putIfAbsent(number, name)
-                nameIndex.putIfAbsent(PhoneNumberNormalizer.normalize(number), name)
-                nameIndex.putIfAbsent(PhoneNumberNormalizer.matchKey(number), name)
-                profileIndex.putIfAbsent(number, profile)
-                profileIndex.putIfAbsent(PhoneNumberNormalizer.normalize(number), profile)
-                profileIndex.putIfAbsent(PhoneNumberNormalizer.matchKey(number), profile)
+                // Never index a blank key: an empty normalized/match key would otherwise match every
+                // alphanumeric sender and mislabel unrelated threads with this contact.
+                for (key in setOf(number, PhoneNumberNormalizer.normalize(number), PhoneNumberNormalizer.matchKey(number))) {
+                    if (key.isBlank()) continue
+                    nameIndex.putIfAbsent(key, name)
+                    profileIndex.putIfAbsent(key, profile)
+                }
             }
         }
         return CachedContactData(nameIndex, profileIndex)

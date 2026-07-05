@@ -34,6 +34,7 @@ import com.kheyr.sms.settings.NotificationContentMode
 import com.kheyr.sms.settings.NotificationPolicyResolver
 import com.kheyr.sms.settings.ThreadNotificationSettings
 import com.kheyr.sms.telephony.OwnNumberResolver
+import com.kheyr.sms.telephony.ThreadIdResolver
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 import java.time.Instant
@@ -78,10 +79,12 @@ class RoomIncomingSmsStore(
             put(Telephony.Sms.TYPE, Telephony.Sms.MESSAGE_TYPE_INBOX)
             message.subscriptionId?.let { put("sub_id", it) }
         }
-        val uri = context.contentResolver.insert(Telephony.Sms.Inbox.CONTENT_URI, values)
+        // Tolerate providers that throw while inserting an alphanumeric sender ID: a failed provider
+        // write must not stop us from persisting the message to the app's own store below.
+        val uri = runCatching { context.contentResolver.insert(Telephony.Sms.Inbox.CONTENT_URI, values) }.getOrNull()
         val telephonyId = uri?.let(ContentUris::parseId)
         val threadId = telephonyId?.let(::threadIdForMessageRow)
-            ?: Telephony.Threads.getOrCreateThreadId(context, setOf(message.sender))
+            ?: ThreadIdResolver.getOrCreateThreadId(context, message.sender)
 
         repository.insertIncomingSms(
             threadId = threadId,

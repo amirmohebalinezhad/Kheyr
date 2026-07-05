@@ -34,12 +34,15 @@ class HeadlessSmsSendService : Service() {
         scope.launch {
             val repository = SmsRepository(this@HeadlessSmsSendService)
             val sender = SmsSender(this@HeadlessSmsSendService)
-            val messageId = repository.persistOutgoing(recipient, body, null)
+            // persistOutgoing writes to the SMS provider and can throw if we are not the default SMS
+            // app; keep it inside the try so a failure marks/stops cleanly instead of crashing.
+            var messageId: Long? = null
             try {
+                messageId = repository.persistOutgoing(recipient, body, null)
                 repository.markSending(messageId)
                 sender.send(com.kheyr.sms.telephony.SmsSendRequest(recipient, body, null, messageId))
             } catch (t: Throwable) {
-                repository.markFailed(messageId)
+                messageId?.let { repository.markFailed(it) }
             } finally {
                 stopSelf(startId)
             }
