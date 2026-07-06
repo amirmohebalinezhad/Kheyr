@@ -88,12 +88,50 @@ class SmsRepository(
         withContext(Dispatchers.IO) { smsDao.updateMuted(threadId, muted) }
 
     suspend fun markThreadRead(threadId: Long) =
-        withContext(Dispatchers.IO) { smsDao.markThreadRead(threadId) }
+        withContext(Dispatchers.IO) {
+            smsDao.markThreadRead(threadId)
+            val values = ContentValues().apply { put(Telephony.Sms.READ, 1) }
+            context.contentResolver.update(
+                Telephony.Sms.CONTENT_URI,
+                values,
+                "${Telephony.Sms.THREAD_ID} = ? AND ${Telephony.Sms.READ} = 0",
+                arrayOf(threadId.toString()),
+            )
+        }
 
     fun updateSendStatus(messageId: Long, status: MessageStatus) = smsDao.updateSendStatus(messageId, status)
 
     private fun syncNewTelephonyMessages() {
-        syncTelephonyMessages(newerThanId = smsDao.latestSyncedTelephonyId())
+        val lastSyncedId = smsDao.latestSyncedTelephonyId()
+        syncTelephonyMessages(newerThanId = lastSyncedId)
+        // Also check for any missing messages in a recent window to handle out-of-order inserts/backups.
+        if (lastSyncedId > 0) {
+            val windowStart = (lastSyncedId - SYNC_ID_GAP_WINDOW).coerceAtLeast(0)
+            val locallyPresent = smsDao.syncedTelephonyIdsInRange(windowStart, lastSyncedId).toSet()
+            val missing = findMissingTelephonyIds(windowStart, lastSyncedId, locallyPresent)
+            if (missing.isNotEmpty()) {
+                syncTelephonyMessages(telephonyIds = missing)
+            }
+        }
+    }
+
+    private fun findMissingTelephonyIds(start: Long, end: Long, locallyPresent: Set<Long>): List<Long> {
+        val projection = arrayOf(Telephony.Sms._ID)
+        return context.contentResolver.query(
+            Telephony.Sms.CONTENT_URI,
+            projection,
+            "${Telephony.Sms._ID} >= ? AND ${Telephony.Sms._ID} <= ?",
+            arrayOf(start.toString(), end.toString()),
+            null
+        )?.use { cursor ->
+            val idCol = cursor.getColumnIndexOrThrow(Telephony.Sms._ID)
+            buildList {
+                while (cursor.moveToNext()) {
+                    val id = cursor.getLong(idCol)
+                    if (id !in locallyPresent) add(id)
+                }
+            }
+        }.orEmpty()
     }
 
     private fun refreshRecentOutgoingMessages() {
@@ -188,11 +226,27 @@ class SmsRepository(
     }
 
     suspend fun deleteThreadMessages(threadId: Long) =
-        withContext(Dispatchers.IO) { smsDao.deleteThreadMessages(threadId) }
+        withContext(Dispatchers.IO) {
+            smsDao.deleteThreadMessages(threadId)
+            context.contentResolver.delete(
+                Telephony.Sms.CONTENT_URI,
+                "${Telephony.Sms.THREAD_ID} = ?",
+                arrayOf(threadId.toString()),
+            )
+        }
 
     suspend fun deleteMessagesByIds(ids: List<Long>) = withContext(Dispatchers.IO) {
         if (ids.isEmpty()) return@withContext
+        val telephonyIds = smsDao.messagesByIds(ids).mapNotNull { it.telephonyId }
         smsDao.deleteMessagesByIds(ids)
+        if (telephonyIds.isNotEmpty()) {
+            val placeholders = telephonyIds.joinToString(",") { "?" }
+            context.contentResolver.delete(
+                Telephony.Sms.CONTENT_URI,
+                "${Telephony.Sms._ID} IN ($placeholders)",
+                telephonyIds.map(Long::toString).toTypedArray(),
+            )
+        }
     }
 
     suspend fun loadLocalMessageEntities(threadId: Long): List<SmsMessageEntity> = withContext(Dispatchers.IO) {
@@ -326,6 +380,7 @@ class SmsRepository(
         private const val SYNC_INSERT_BATCH_SIZE = 500
         private const val RECENT_OUTGOING_REFRESH_LIMIT = 50
         private const val RECENT_OUTGOING_REFRESH_BATCH_SIZE = 25
+        private const val SYNC_ID_GAP_WINDOW = 1000L
     }
     private fun SmsMessageEntity.toModel() = SmsMessage(
         id = id,

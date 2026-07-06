@@ -9,7 +9,8 @@ class SpamRuleUpdatePolicy {
         val invalidRule = candidate.rules.firstOrNull {
             it.id.isBlank() ||
                 (it.score == 0 && it.type != SpamRuleType.KnownSafeSender) ||
-                it.requiresPattern() && it.pattern.isNullOrBlank()
+                (it.requiresPattern() && it.pattern.isNullOrBlank()) ||
+                ((it.type == SpamRuleType.MessageRegex || it.type == SpamRuleType.OtpRegex) && !isRegexValid(it.pattern))
         }
         return if (invalidRule == null) SpamRuleUpdateDecision.Accept else SpamRuleUpdateDecision.RejectInvalid("Invalid rule: ${invalidRule.id}")
     }
@@ -18,6 +19,16 @@ class SpamRuleUpdatePolicy {
         type != SpamRuleType.SenderNotInContacts &&
         type != SpamRuleType.ShortCode &&
         type != SpamRuleType.SuspiciousLinkPattern
+
+    fun isRegexValid(pattern: String?): Boolean {
+        if (pattern == null) return false
+        return try {
+            pattern.toRegex()
+            true
+        } catch (t: Throwable) {
+            false
+        }
+    }
 }
 
 sealed interface SpamRuleUpdateDecision {

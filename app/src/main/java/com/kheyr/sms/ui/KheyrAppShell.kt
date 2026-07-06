@@ -666,7 +666,10 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                                         }
                                     }
                                     withContext(Dispatchers.Main) {
-                                        if (tokens != null || !ApiConfig.isConfigured) onboardingStep = 3
+                                        if (tokens != null || !ApiConfig.isConfigured) {
+                                            if (onboardingStep == 3) onboardingStep = 4
+                                            else onboardingStep = 3
+                                        }
                                         else statusMessage = "OTP verification failed. Check code or configure API base URL."
                                     }
                                 }

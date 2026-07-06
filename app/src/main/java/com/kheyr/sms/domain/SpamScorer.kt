@@ -1,6 +1,8 @@
 package com.kheyr.sms.domain
 
 class SpamScorer(private val ruleSet: SpamRuleSet) {
+    private val regexCache = mutableMapOf<String, Regex?>()
+
     fun score(sender: String, body: String, senderIsContact: Boolean): SpamScore {
         val safeRule = ruleSet.rules.firstOrNull {
             it.enabled && it.type == SpamRuleType.KnownSafeSender && matches(it, sender, body, senderIsContact)
@@ -29,7 +31,21 @@ class SpamScorer(private val ruleSet: SpamRuleSet) {
         SpamRuleType.SenderContains -> rule.pattern?.let { sender.contains(it, ignoreCase = true) } == true
         SpamRuleType.NumberPrefix -> rule.pattern?.let { sender.startsWith(it) } == true
         SpamRuleType.MessageKeyword -> rule.pattern?.let { body.contains(it, ignoreCase = true) } == true
-        SpamRuleType.MessageRegex, SpamRuleType.OtpRegex -> rule.pattern?.toRegex(RegexOption.IGNORE_CASE)?.containsMatchIn(body) == true
+        SpamRuleType.MessageRegex, SpamRuleType.OtpRegex -> {
+            val pattern = rule.pattern
+            if (pattern == null) {
+                false
+            } else {
+                val regex = regexCache.getOrPut(rule.id) {
+                    try {
+                        pattern.toRegex(RegexOption.IGNORE_CASE)
+                    } catch (t: Throwable) {
+                        null
+                    }
+                }
+                regex?.containsMatchIn(body) == true
+            }
+        }
         SpamRuleType.UrlDetected -> urlRegex.containsMatchIn(body)
         SpamRuleType.SuspiciousLinkPattern -> suspiciousLinkRegex.containsMatchIn(body)
         SpamRuleType.SenderNotInContacts -> !senderIsContact

@@ -27,9 +27,19 @@ interface SmsDao {
     @Transaction
     fun insertOutgoingSms(message: SmsMessageEntity): Long = insertSms(message.copy(direction = MessageDirection.Outgoing))
 
+    @Query("""
+        INSERT INTO threads (id, address, displayName, createdAt)
+        VALUES (:id, :address, :displayName, :createdAt)
+        ON CONFLICT(id) DO UPDATE SET
+            address = excluded.address,
+            displayName = CASE WHEN threads.displayName = threads.address THEN excluded.displayName ELSE threads.displayName END,
+            createdAt = MIN(threads.createdAt, excluded.createdAt)
+    """)
+    fun upsertThreadInitial(id: Long, address: String, displayName: String, createdAt: Instant)
+
     @Transaction
     fun insertSms(message: SmsMessageEntity): Long {
-        upsertThread(SmsThreadEntity(message.threadId, message.address, message.address, message.timestamp))
+        upsertThreadInitial(message.threadId, message.address, message.address, message.timestamp)
         insertThreadState(ThreadStateEntity(message.threadId))
         return insertMessage(message)
     }
@@ -41,6 +51,9 @@ interface SmsDao {
 
     @Query("SELECT COALESCE(MAX(telephonyId), 0) FROM messages WHERE telephonyId IS NOT NULL")
     fun latestSyncedTelephonyId(): Long
+
+    @Query("SELECT telephonyId FROM messages WHERE telephonyId >= :start AND telephonyId <= :end")
+    fun syncedTelephonyIdsInRange(start: Long, end: Long): List<Long>
 
     @Query("""
         SELECT t.id, t.address, t.displayName, m.body AS lastMessage, m.timestamp AS lastMessageAt,
@@ -56,6 +69,9 @@ interface SmsDao {
     """)
     fun inboxThreads(): List<ThreadWithLatestMessage>
 
+    @Query("SELECT telephonyId FROM messages WHERE telephonyId >= :start AND telephonyId <= :end")
+    fun syncedTelephonyIdsInRange(start: Long, end: Long): List<Long>
+
     @Query("""
         SELECT t.id, t.address, t.displayName, m.body AS lastMessage, m.timestamp AS lastMessageAt,
             (SELECT COUNT(*) FROM messages unread
@@ -69,6 +85,9 @@ interface SmsDao {
         ORDER BY m.timestamp DESC
     """)
     fun spamThreads(): List<ThreadWithLatestMessage>
+
+    @Query("SELECT telephonyId FROM messages WHERE telephonyId >= :start AND telephonyId <= :end")
+    fun syncedTelephonyIdsInRange(start: Long, end: Long): List<Long>
 
     @Query("""
         SELECT t.id, t.address, t.displayName, m.body AS lastMessage, m.timestamp AS lastMessageAt,
@@ -225,6 +244,9 @@ interface SmsDao {
     @Query("SELECT telephonyId FROM messages WHERE telephonyId IS NOT NULL")
     fun syncedTelephonyIds(): List<Long>
 
+    @Query("SELECT telephonyId FROM messages WHERE telephonyId >= :start AND telephonyId <= :end")
+    fun syncedTelephonyIdsInRange(start: Long, end: Long): List<Long>
+
     @Query("""
         SELECT t.id, t.address, t.displayName, m.body AS lastMessage, m.timestamp AS lastMessageAt,
             (SELECT COUNT(*) FROM messages unread
@@ -244,6 +266,9 @@ interface SmsDao {
 
     @Query("DELETE FROM messages WHERE id IN (:ids)")
     fun deleteMessagesByIds(ids: List<Long>)
+
+    @Query("SELECT * FROM messages WHERE id IN (:ids)")
+    fun messagesByIds(ids: List<Long>): List<SmsMessageEntity>
 
     @Query("SELECT COALESCE(s.isMuted, 0) FROM thread_state s WHERE s.threadId = :threadId")
     fun isThreadMuted(threadId: Long): Boolean?
