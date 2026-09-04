@@ -263,9 +263,10 @@ December 31 of a Gregorian leap year is converted to the previous Jalali day. Ex
 | 2024-12-31 | ۱۰ دی ۱۴۰۳ | ۱۱ دی ۱۴۰۳ |
 
 Every message received in March to December 2024 shows the wrong date today, and the same will happen for
-all of 2028. A Python port of the function cross-checked against the `jdatetime` library disagrees on
-918 of the 4,383 days between 2020 and 2031 (306 days in each leap year, none elsewhere). The existing
-unit test only checks Nowruz 2026, a non-leap year, so it passes.
+all of 2028. Confirmed by a unit test against the Kotlin implementation (appendix), and a Python port of
+the function cross-checked against the `jdatetime` library disagrees on 918 of the 4,383 days between 2020
+and 2031 (306 days in each leap year, none elsewhere). The existing unit test only checks Nowruz 2026, a
+non-leap year, so it passes.
 
 **Fix:** add the `gm > 2` adjustment (`val gy2 = if (gm > 2) gy + 1 else gy` and use `gy2` for the three
 leap-year terms while keeping `365 * gy` on the unadjusted year), and add leap-year test cases.
@@ -290,7 +291,8 @@ thread's value to pick the reply SIM, `SimBadgeResolver` matches it against `Sim
 row already carries its telephony id, it is never re-read from the provider, so the wrong value is
 permanent. On a dual-SIM phone the slot index `1` (second SIM) is easily a valid subscription id for the
 *first* SIM, and the comment in `ComposerSimResolver` shows the authors were aware this confusion routes
-replies out the wrong SIM.
+replies out the wrong SIM. Confirmed by a Robolectric test: persisting an `IncomingSms` with
+`simSlot = 1, subscriptionId = 7` stores `1` (appendix).
 
 **Fix:** pass `message.subscriptionId` to `insertIncomingSms()` (and ideally rename the column to
 `subscriptionId`).
@@ -554,7 +556,8 @@ Commit `74e3fdb` introduced `upsertThreadInitial`, which keeps an existing `disp
 `createdAt`, but the existing-row branch of `upsertTelephonyMessage()` still calls the `REPLACE`
 `upsertThread(...)` with `displayName = address` and `createdAt = message.timestamp`, so the fifty most
 recent outgoing messages re-synced on every refresh keep wiping those columns. Harmless today only because
-nothing else writes `displayName`.
+nothing else writes `displayName`. Confirmed by a Room test (appendix): after `upsertThread(..., "Alice", ...)`
+a second `upsertTelephonyMessage` of the same telephony id resets `displayName` to the address.
 
 <a id="b-31"></a>
 ### B-31. Contact cache is never invalidated (Low)
@@ -609,8 +612,9 @@ characters whose lowercase form has a different length (e.g. `İ`, some ligature
 `AGENTS.md` (section "Known pre-existing failures")
 
 It says `SmsDaoTest.insertGroupsMessagesByThreadWithLatestPreviewAndUnreadCount` fails because
-`inboxThreads()` computes `unreadCount` with a `SUM` over a single-row join; the current query
-(`SmsDao.kt:58-70`) already uses a correlated `COUNT(*)` sub-select, and the lint error it cites at
+`inboxThreads()` computes `unreadCount` with a `SUM` over a single-row join, and that "the other 51 unit
+tests pass". The current query (`SmsDao.kt:58-70`) already uses a correlated `COUNT(*)` sub-select, that
+test passes, and the suite has 174 tests (once it compiles again, see B-37). The lint error it cites at
 `SmsReceiver.kt:135` refers to a file that is now 24 lines long (the notifier carries
 `@SuppressLint("MissingPermission")`). See the appendix for the actual test results.
 
@@ -646,8 +650,25 @@ It says `SmsDaoTest.insertGroupsMessagesByThreadWithLatestPreviewAndUnreadCount`
   unit tests; usage of suspicious APIs confirmed with `grep` (B-03, B-04, B-18, B-19, B-24).
 - **GitHub Actions run #121** (`main`, commit `74e3fdb`): failed in dependency resolution against
   `maven.aliyun.com` with HTTP 502 before compiling (B-02).
-- **B-07:** the Kotlin function was ported line-for-line to Python and compared with both the reference
-  algorithm and the `jdatetime` library over 2000 to 2099; mismatches occur only on days 61 to 366 of leap
-  years.
-- **Build and tests** were run in this environment with Gradle 8.14.3, JDK 21 and Android SDK platform 35
-  (CI uses JDK 17; the Kotlin errors are the same either way).
+- **Compile:** `gradle :app:compileDebugKotlin` at `74e3fdb` fails with the four `Conflicting overloads`
+  errors (B-01).
+- **Unit tests:** `gradle :app:testDebugUnitTest` fails to compile the test sources (B-37). On a working
+  tree with the three duplicate DAO declarations removed and `SpamClassificationThresholdsTest.kt` set
+  aside, the existing suite is **174 tests, all passing**, including
+  `SmsDaoTest.insertGroupsMessagesByThreadWithLatestPreviewAndUnreadCount`, which `AGENTS.md` lists as a
+  known failure.
+- **Throwaway verification tests** (kept out of the repository) were run against that same tree. Each one
+  asserts the behaviour the app *should* have, so a failure confirms the bug:
+
+  | Finding | Assertion | Result |
+  | --- | --- | --- |
+  | B-07 | `gregorianToJalali(2024-03-20)` is 1403/01/01 | fails: 1402/12/29 (2024-03-01 gives 1402/12/10, 2024-12-31 gives 1403/10/10; the non-leap 2025-03-21 case passes) |
+  | B-08 | `RoomIncomingSmsStore.persistInbox(IncomingSms(simSlot = 1, subscriptionId = 7))` stores 7 in `simSlot` | fails: stores 1 |
+  | B-30 | `upsertTelephonyMessage` of an existing row keeps the thread's `displayName` "Alice" | fails: reset to the address |
+  | B-06 | `SyncUploader` with an OkHttp client that answers 503 keeps the queue row | see below |
+
+- **B-07:** the Kotlin function was also ported line-for-line to Python and compared with both the
+  reference algorithm and the `jdatetime` library over 2000 to 2099; mismatches occur only on days 61 to
+  366 of leap years.
+- **Environment:** Gradle 8.14.3, JDK 21, Android SDK platform 35, Robolectric SDK 34 (CI uses JDK 17; the
+  Kotlin errors are the same either way).
