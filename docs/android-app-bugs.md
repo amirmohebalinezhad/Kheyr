@@ -47,6 +47,7 @@ Severity scale: **Critical** = nothing ships / crash loop, **High** = feature do
 | [B-34](#b-34) | Low | UI | Call button is shown for alphanumeric senders (dials `tel:VERIFY`) |
 | [B-35](#b-35) | Low | UI | Search highlighting can index past the end of the string for some Unicode input |
 | [B-36](#b-36) | Low | Docs | `AGENTS.md` describes failures that no longer match the code |
+| [B-37](#b-37) | High | Tests | Unit-test source set does not compile (test for a class deleted in `c924f87`) |
 
 ---
 
@@ -99,6 +100,29 @@ red unit-test suite (see B-36) goes unnoticed.
 **Fix:** remove the mirrors from `settings.gradle` (or gate them behind a Gradle property for developers
 who need them) so `google()` and `mavenCentral()` are used by default, and add the unit-test task to the
 workflow.
+
+<a id="b-37"></a>
+### B-37. Unit-test source set does not compile (High)
+
+`app/src/test/java/com/kheyr/sms/spam/SpamClassificationThresholdsTest.kt:8-9`
+
+Commit `c924f87` ("remove dead duplicate SpamClassification/threshold logic") deleted
+`SpamClassificationThresholds` (and the duplicate `SpamClassification` enum in the `spam` package) from the
+main source set but left this test behind. Kotlin reports `Unresolved reference 'SpamClassification'` and
+`Unresolved reference 'SpamClassificationThresholds'`, so `:app:compileDebugUnitTestKotlin` fails and not a
+single unit test has been runnable since 2026-06-19, independently of B-01. Because CI never runs the test
+task (B-02), nobody noticed; `AGENTS.md` still claims 51 tests pass (B-36).
+
+Verified by running `gradle :app:testDebugUnitTest` on a working tree with B-01 fixed:
+
+```
+e: SpamClassificationThresholdsTest.kt:8:22 Unresolved reference 'SpamClassification'.
+e: SpamClassificationThresholdsTest.kt:8:53 Unresolved reference 'SpamClassificationThresholds'.
+BUILD FAILED
+```
+
+**Fix:** delete the test (its behaviour is covered by `SpamScorerTest`) or port it to
+`com.kheyr.sms.domain.SpamScorer`.
 
 ---
 
