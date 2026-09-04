@@ -97,6 +97,13 @@ interface SmsDao {
     @Query("SELECT * FROM messages WHERE threadId = :threadId ORDER BY timestamp ASC, id ASC")
     fun messagesForThread(threadId: Long): List<SmsMessageEntity>
 
+    @Query("SELECT * FROM messages ORDER BY timestamp ASC, id ASC")
+    fun allMessages(): List<SmsMessageEntity>
+
+    // timestamp is stored as epoch millis by Converters, so the Instant parameter binds directly.
+    @Query("SELECT m.id FROM messages m JOIN thread_state s ON s.threadId = m.threadId WHERE s.isSpam = 1 AND m.timestamp < :cutoff")
+    fun spamMessageIdsOlderThan(cutoff: Instant): List<Long>
+
     @Query("SELECT * FROM messages WHERE body LIKE '%' || :query || '%' OR address LIKE '%' || :query || '%' ORDER BY timestamp DESC, id DESC")
     fun searchMessages(query: String): List<SmsMessageEntity>
 
@@ -141,8 +148,27 @@ interface SmsDao {
         updateSpamState(threadId, isSpam)
     }
 
-    @Query("UPDATE thread_state SET isSpam = :isSpam WHERE threadId = :threadId")
+    // The UI path records the user's intent as well as the flag: marking a thread "Not spam" pins that
+    // decision so [autoMarkSpam] can no longer re-flag it, and marking it spam again clears the override.
+    @Query("UPDATE thread_state SET isSpam = :isSpam, userNotSpam = NOT :isSpam WHERE threadId = :threadId")
     fun updateSpamState(threadId: Long, isSpam: Boolean)
+
+    @Query("SELECT COALESCE(userNotSpam, 0) FROM thread_state WHERE threadId = :threadId")
+    fun isUserNotSpam(threadId: Long): Boolean?
+
+    /**
+     * Automatic (classifier-driven) spam flagging. Unlike [updateSpam] this respects an earlier
+     * "Not spam" correction and never touches [ThreadStateEntity.userNotSpam] itself.
+     */
+    @Transaction
+    fun autoMarkSpam(threadId: Long) {
+        ensureThreadState(threadId)
+        if (isUserNotSpam(threadId) == true) return
+        markSpamAutomatically(threadId)
+    }
+
+    @Query("UPDATE thread_state SET isSpam = 1 WHERE threadId = :threadId")
+    fun markSpamAutomatically(threadId: Long)
 
     @Transaction
     fun updateMuted(threadId: Long, isMuted: Boolean) {
@@ -223,7 +249,9 @@ interface SmsDao {
                 read = message.read,
                 simSlot = message.simSlot,
             )
-            upsertThread(SmsThreadEntity(message.threadId, message.address, message.address, message.timestamp))
+            // Re-syncing an existing message must not reset the thread row: upsertThreadInitial keeps a
+            // display name the user/contacts already gave the thread and the earliest createdAt (B-30).
+            upsertThreadInitial(message.threadId, message.address, message.address, message.timestamp)
         }
     }
 

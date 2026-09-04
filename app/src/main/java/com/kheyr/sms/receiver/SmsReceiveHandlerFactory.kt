@@ -34,12 +34,15 @@ object SmsReceiveHandlerFactory {
         val sender = messages.firstOrNull()?.originatingAddress.orEmpty()
         val body = messages.joinToString(separator = "") { it.messageBody.orEmpty() }
         if (sender.isBlank() && body.isBlank()) return null
-        val receivedAt = messages.minOfOrNull(android.telephony.SmsMessage::getTimestampMillis) ?: System.currentTimeMillis()
+        // getTimestampMillis() is the SMSC clock; the message's own date must be the device receive
+        // time so a network-delayed message still sorts as the newest one in its thread.
+        val sentAt = messages.minOfOrNull(android.telephony.SmsMessage::getTimestampMillis)
+        val receivedAt = System.currentTimeMillis()
         val subscriptionId = intent.getIntExtra("subscription", -1).takeIf { it >= 0 }
             ?: intent.getIntExtra("android.telephony.extra.SUBSCRIPTION_INDEX", -1).takeIf { it >= 0 }
         val simSlot = intent.getIntExtra("slot", -1).takeIf { it >= 0 }
             ?: intent.getIntExtra("simSlot", -1).takeIf { it >= 0 }
             ?: intent.getIntExtra("android.telephony.extra.SLOT_INDEX", -1).takeIf { it >= 0 }
-        return IncomingSms(sender, body, receivedAt, simSlot, subscriptionId)
+        return IncomingSms(sender, body, receivedAt, sentAt, simSlot, subscriptionId)
     }
 }

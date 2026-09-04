@@ -75,6 +75,33 @@ class SyncUploaderTest {
         assertEquals(listOf(2L, 1L), store.uploadedQueueIds)
     }
 
+    @Test fun failedUploadLeavesQueueRowsPendingForTheNextRun() {
+        val store = InMemoryQueueStore(
+            listOf(
+                MessageChangeSyncRecord(queueId = 1, createdAt = Instant.EPOCH, message = sms(body = "hello")),
+                InitialBackfillSyncRecord(
+                    queueId = 2,
+                    createdAt = Instant.EPOCH,
+                    message = sms(id = 10, body = "deleted before sync"),
+                    locallyDeletedBeforeSync = true,
+                ),
+            ),
+        )
+        val api = CapturingApiClient(succeeds = false)
+
+        val uploaded = SyncUploader(
+            settingsProvider = { SyncSettings(enabled = true, deviceId = "device-1") },
+            queueStore = store,
+            apiClient = api,
+            encryptor = SmsBodyEncryptor(key),
+        ).uploadPending()
+
+        // An offline window or a 5xx must not consume the queue: nothing is deleted or marked, so the
+        // next run retries the same rows (B-06).
+        assertEquals(0, uploaded)
+        assertEquals(emptyList<Long>(), store.uploadedQueueIds)
+    }
+
     @Test fun syncIsOffByDefault() {
         assertFalse(SyncSettings().canUpload)
     }
@@ -89,10 +116,11 @@ class SyncUploaderTest {
         status = MessageStatus.Received,
     )
 
-    private class CapturingApiClient : SyncApiClient {
+    private class CapturingApiClient(private val succeeds: Boolean = true) : SyncApiClient {
         val uploaded = mutableListOf<SyncUploadDto>()
-        override fun upload(payloads: List<SyncUploadDto>) {
+        override fun upload(payloads: List<SyncUploadDto>): Boolean {
             uploaded += payloads
+            return succeeds
         }
     }
 

@@ -82,17 +82,20 @@ private fun segments(text: String, links: List<MessageLink>, highlightRanges: Li
     }
 }
 
-private fun highlightRanges(text: String, highlight: String?): List<IntRange> {
+// Searching the original string case-insensitively keeps every index anchored to `text`.
+// Searching `text.lowercase()` used to drift whenever a character's lowercase form has a
+// different length (the Turkish dotted capital I lowercases to two code units), which made
+// segments() substring past the end of `text`.
+internal fun highlightRanges(text: String, highlight: String?): List<IntRange> {
     if (highlight.isNullOrBlank()) return emptyList()
-    val lowerText = text.lowercase()
-    val lowerHighlight = highlight.lowercase()
     val ranges = mutableListOf<IntRange>()
     var start = 0
-    while (start < text.length) {
-        val index = lowerText.indexOf(lowerHighlight, start)
+    while (start <= text.length - highlight.length) {
+        val index = text.indexOf(highlight, start, ignoreCase = true)
         if (index < 0) break
         ranges += index until index + highlight.length
-        start = index + highlight.length
+        // A blank needle is already excluded above; coerce anyway so the loop can never stall.
+        start = index + highlight.length.coerceAtLeast(1)
     }
     return ranges
 }

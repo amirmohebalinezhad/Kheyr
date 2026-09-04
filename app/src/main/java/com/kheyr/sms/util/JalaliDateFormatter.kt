@@ -5,6 +5,7 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.temporal.ChronoUnit
+import java.util.Locale
 
 object JalaliDateFormatter {
     private val zone: ZoneId get() = ZoneId.systemDefault()
@@ -29,7 +30,10 @@ object JalaliDateFormatter {
         val nowZoned = now.atZone(zone)
         val messageDate = messageZoned.toLocalDate()
         val today = nowZoned.toLocalDate()
-        val time = toPersianDigits(String.format("%02d:%02d", messageZoned.hour, messageZoned.minute))
+        // Format with an explicit locale: under a default locale whose digits are Arabic-Indic,
+        // String.format would already emit non-ASCII digits that toPersianDigits cannot map,
+        // producing a timestamp that mixes digit systems.
+        val time = toPersianDigits(String.format(Locale.US, "%02d:%02d", messageZoned.hour, messageZoned.minute))
 
         return when {
             messageDate == today -> time
@@ -64,7 +68,13 @@ object JalaliDateFormatter {
         val gDaysInMonth = intArrayOf(0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334)
         var jy = if (gy > 1600) 979 else 0
         val gy2 = if (gy > 1600) gy - 1600 else gy - 621
-        var days = (365 * gy2) + ((gy2 + 3) / 4) - ((gy2 + 99) / 100) + ((gy2 + 399) / 400) - 80 + gd + gDaysInMonth[gm - 1]
+        // The leap-day corrections count the leap days that have already occurred: after February the
+        // current year's own leap day is already behind us, so those three terms use the year + 1 while
+        // the plain 365-day term stays on the unadjusted year. Dropping this made every date from
+        // 1 March to 31 December of a Gregorian leap year come out one Jalali day early.
+        val leapAdjustedYear = if (gm > 2) gy2 + 1 else gy2
+        var days = (365 * gy2) + ((leapAdjustedYear + 3) / 4) - ((leapAdjustedYear + 99) / 100) +
+            ((leapAdjustedYear + 399) / 400) - 80 + gd + gDaysInMonth[gm - 1]
         jy += 33 * (days / 12053)
         days %= 12053
         jy += 4 * (days / 1461)

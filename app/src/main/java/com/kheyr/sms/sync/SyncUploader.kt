@@ -15,7 +15,11 @@ interface SyncQueueStore {
 }
 
 interface SyncApiClient {
-    fun upload(payloads: List<SyncUploadDto>)
+    /**
+     * Returns true only when the backend confirmed the upload. A false result must leave the queue
+     * rows untouched so the next run retries them instead of dropping the events (B-06).
+     */
+    fun upload(payloads: List<SyncUploadDto>): Boolean
 }
 
 fun interface SyncLogger {
@@ -52,9 +56,12 @@ class SyncUploader(
             return 0
         }
 
-        apiClient.upload(payloads)
-        // Delete only after a confirmed successful upload so retry semantics (pending() returns
-        // rows that are still present) keep working when upload fails.
+        if (!apiClient.upload(payloads)) {
+            // Delete only after a confirmed successful upload so retry semantics (pendingRecords()
+            // returns rows that are still present) keep working when upload fails.
+            logger.info("Sync upload failed; ${payloads.size} event(s) stay queued for the next run")
+            return 0
+        }
         queueStore.deleteUploaded(payloads.map { it.queueId } + skippedDeletedBackfillIds)
         logger.info("Uploaded ${payloads.size} encrypted sync event(s)")
         return payloads.size

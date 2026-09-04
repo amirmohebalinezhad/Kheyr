@@ -36,7 +36,11 @@ class PolicyAwareIncomingSmsNotifierTest {
         notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
     }
 
-    @After fun tearDown() = database.close()
+    @After fun tearDown() {
+        // ActiveConversation is process-wide state; leaving it set would leak into other tests.
+        ActiveConversation.setOpen(null)
+        database.close()
+    }
 
     @Test fun postsHeadsUpNotificationWithFullTextAndReplyMarkReadCopyActions() {
         notifier.show(storedSms(threadId = 1, body = "Your verification code is 123456"), senderIsContact = false)
@@ -73,11 +77,28 @@ class PolicyAwareIncomingSmsNotifierTest {
         assertEquals(listOf("Reply", "Mark as read"), notification.actions.map { it.title.toString() })
     }
 
+    @Test fun noNotificationForTheConversationCurrentlyOnScreen() {
+        ActiveConversation.setOpen(3L)
+
+        notifier.show(storedSms(threadId = 3, body = "Reply while you are reading"), senderIsContact = false)
+
+        assertTrue(shadowOf(notificationManager).allNotifications.isEmpty())
+    }
+
+    @Test fun stillNotifiesForOtherThreadsWhileAConversationIsOpen() {
+        ActiveConversation.setOpen(3L)
+
+        notifier.show(storedSms(threadId = 4, body = "Different conversation"), senderIsContact = false)
+
+        assertEquals(1, shadowOf(notificationManager).allNotifications.size)
+    }
+
     private fun storedSms(threadId: Long, body: String) = StoredIncomingSms(
         threadId = threadId,
         sender = "+15551234567",
         body = body,
         receivedAtMillis = 1_700_000_000_000L,
+        sentAtMillis = null,
         simSlot = null,
         subscriptionId = null,
     )

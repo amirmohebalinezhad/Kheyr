@@ -48,6 +48,14 @@ class AppPreferences(context: Context) {
         get() = prefs.getString(KEY_PUSH_TOKEN, null)
         set(value) = prefs.edit().apply { if (value == null) remove(KEY_PUSH_TOKEN) else putString(KEY_PUSH_TOKEN, value) }.apply()
 
+    /**
+     * True once the one-off history backfill has been queued for sync (B-03). Reset on sign-out so a
+     * new account backfills again.
+     */
+    var initialBackfillDone: Boolean
+        get() = prefs.getBoolean(KEY_INITIAL_BACKFILL_DONE, false)
+        set(value) = prefs.edit().putBoolean(KEY_INITIAL_BACKFILL_DONE, value).apply()
+
     var spamAutoDeleteDays: Int
         get() = prefs.getInt(KEY_SPAM_AUTO_DELETE_DAYS, 0)
         set(value) = prefs.edit().putInt(KEY_SPAM_AUTO_DELETE_DAYS, value).apply()
@@ -157,6 +165,7 @@ class AppPreferences(context: Context) {
         private const val KEY_DIRECT_MESSAGES = "direct_messages_enabled"
         private const val KEY_USER_PHONE = "user_phone"
         private const val KEY_PUSH_TOKEN = "push_token"
+        private const val KEY_INITIAL_BACKFILL_DONE = "initial_backfill_done"
         private const val KEY_SPAM_AUTO_DELETE_DAYS = "spam_auto_delete_days"
         private const val KEY_NOTIF_CONTENT = "notif_content_mode"
         private const val KEY_UNKNOWN_SENDER = "unknown_sender_mode"
