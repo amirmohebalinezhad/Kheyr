@@ -52,9 +52,6 @@ interface SmsDao {
     @Query("SELECT COALESCE(MAX(telephonyId), 0) FROM messages WHERE telephonyId IS NOT NULL")
     fun latestSyncedTelephonyId(): Long
 
-    @Query("SELECT telephonyId FROM messages WHERE telephonyId >= :start AND telephonyId <= :end")
-    fun syncedTelephonyIdsInRange(start: Long, end: Long): List<Long>
-
     @Query("""
         SELECT t.id, t.address, t.displayName, m.body AS lastMessage, m.timestamp AS lastMessageAt,
             (SELECT COUNT(*) FROM messages unread
@@ -69,9 +66,6 @@ interface SmsDao {
     """)
     fun inboxThreads(): List<ThreadWithLatestMessage>
 
-    @Query("SELECT telephonyId FROM messages WHERE telephonyId >= :start AND telephonyId <= :end")
-    fun syncedTelephonyIdsInRange(start: Long, end: Long): List<Long>
-
     @Query("""
         SELECT t.id, t.address, t.displayName, m.body AS lastMessage, m.timestamp AS lastMessageAt,
             (SELECT COUNT(*) FROM messages unread
@@ -85,9 +79,6 @@ interface SmsDao {
         ORDER BY m.timestamp DESC
     """)
     fun spamThreads(): List<ThreadWithLatestMessage>
-
-    @Query("SELECT telephonyId FROM messages WHERE telephonyId >= :start AND telephonyId <= :end")
-    fun syncedTelephonyIdsInRange(start: Long, end: Long): List<Long>
 
     @Query("""
         SELECT t.id, t.address, t.displayName, m.body AS lastMessage, m.timestamp AS lastMessageAt,
