@@ -208,7 +208,9 @@ longer decrypt anything).
 therefore has no way to learn that the upload failed and always calls `deleteUploaded()` right after
 `apiClient.upload()`, despite the comment "Delete only after a confirmed successful upload". Any offline
 period or 5xx permanently drops those events, and `SyncWorker` then records `lastSuccessfulUploadAt`.
-(Today this is masked by B-03; once the queue is actually fed, this becomes data loss.)
+Confirmed by a Robolectric test with an OkHttp interceptor answering 503: the uploader still calls
+`deleteUploaded([1])` (appendix). Today this is masked by B-03; once the queue is actually fed, this
+becomes data loss.
 
 **Fix:** make `upload()` return a `Boolean` (or throw) and only delete rows on success; leave them
 pending otherwise so the next run retries.
@@ -665,7 +667,7 @@ test passes, and the suite has 174 tests (once it compiles again, see B-37). The
   | B-07 | `gregorianToJalali(2024-03-20)` is 1403/01/01 | fails: 1402/12/29 (2024-03-01 gives 1402/12/10, 2024-12-31 gives 1403/10/10; the non-leap 2025-03-21 case passes) |
   | B-08 | `RoomIncomingSmsStore.persistInbox(IncomingSms(simSlot = 1, subscriptionId = 7))` stores 7 in `simSlot` | fails: stores 1 |
   | B-30 | `upsertTelephonyMessage` of an existing row keeps the thread's `displayName` "Alice" | fails: reset to the address |
-  | B-06 | `SyncUploader` with an OkHttp client that answers 503 keeps the queue row | see below |
+  | B-06 | `SyncUploader` with an OkHttp client that answers 503 keeps the queue row | fails: `deleteUploaded([1])` is called anyway |
 
 - **B-07:** the Kotlin function was also ported line-for-line to Python and compared with both the
   reference algorithm and the `jdatetime` library over 2000 to 2099; mismatches occur only on days 61 to
