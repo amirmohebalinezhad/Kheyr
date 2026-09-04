@@ -1,1 +1,21 @@
-<full-backup-content />
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Auto Backup rules for API <= 30 (android:fullBackupContent).
+
+  The SQLCipher database and the Keystore-wrapped preference files are excluded: their
+  keys live in the device's hardware Keystore and are NOT part of the backup set, so a
+  restore onto another device (or after a factory reset) would produce ciphertext that
+  can never be decrypted. Backing them up buys nothing and leaks encrypted user data.
+-->
+<full-backup-content>
+    <!-- SQLCipher database plus the journal/WAL siblings Room may leave alongside it. -->
+    <exclude domain="database" path="kheyr_sms.db" />
+    <exclude domain="database" path="kheyr_sms.db-shm" />
+    <exclude domain="database" path="kheyr_sms.db-wal" />
+    <exclude domain="database" path="kheyr_sms.db-journal" />
+
+    <!-- Keystore-wrapped secrets: db passphrase, sync content key, auth + refresh tokens. -->
+    <exclude domain="sharedpref" path="kheyr_secure_db.xml" />
+    <exclude domain="sharedpref" path="kheyr_sync_key_store.xml" />
+    <exclude domain="sharedpref" path="kheyr_prefs.xml" />
+</full-backup-content>

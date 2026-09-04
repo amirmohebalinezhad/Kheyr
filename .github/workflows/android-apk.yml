@@ -31,6 +31,22 @@ jobs:
         with:
           gradle-version: '8.14.4'
 
+      # Unit tests run before assembleDebug so a red suite fails the job fast,
+      # rather than publishing an APK built from code that does not pass tests.
+      - name: Run unit tests
+        run: gradle --no-daemon :app:testDebugUnitTest
+
+      # if: always() so the HTML report is still uploaded when the tests fail,
+      # which is exactly the case where it is needed to diagnose the failure.
+      - name: Upload unit test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kheyr-unit-test-report-${{ github.sha }}
+          path: app/build/reports/tests/testDebugUnitTest
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Build debug APK
         run: gradle --no-daemon :app:assembleDebug
 
@@ -42,7 +58,15 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+      # The markdown backticks around the names are escaped: inside an unquoted
+      # heredoc bash would otherwise treat them as command substitution and try to
+      # execute the artifact name, mangling the summary (B-38).
       - name: Write install instructions to job summary
+        env:
+          ARTIFACT_NAME: kheyr-debug-apk-${{ github.sha }}
         run: |
-          echo "## Installable APK" >> "$GITHUB_STEP_SUMMARY"
-          echo "Download the artifact named `kheyr-debug-apk-${{ github.sha }}`, unzip it, and install `app-debug.apk` on your Android phone." >> "$GITHUB_STEP_SUMMARY"
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
+          ## Installable APK
+
+          Download the artifact named \`$ARTIFACT_NAME\`, unzip it, and install \`app-debug.apk\` on your Android phone.
+          EOF
