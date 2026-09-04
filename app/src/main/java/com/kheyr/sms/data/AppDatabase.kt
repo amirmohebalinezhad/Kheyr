@@ -92,9 +92,18 @@ abstract class AppDatabase : RoomDatabase() {
                 database.openHelper.readableDatabase
                 return
             } catch (t: Throwable) {
+                if (!isUndecryptableStore(t)) {
+                    // Anything else — a missing migration, a failed identity-hash check, a full disk —
+                    // must still fail loudly. Deleting here would turn "we forgot a migration" into
+                    // "every user silently lost their SMS", which is exactly what buildEncryptedDatabase
+                    // refuses to do by leaving out fallbackToDestructiveMigration().
+                    Log.e(TAG, "Encrypted database could not be opened; NOT recreating it", t)
+                    throw t
+                }
                 Log.e(
                     TAG,
-                    "Encrypted database could not be opened; deleting the unreadable store and recreating it",
+                    "Encrypted database cannot be decrypted with the current passphrase; " +
+                        "deleting the unreadable store and recreating it",
                     t,
                 )
             }
@@ -102,9 +111,28 @@ abstract class AppDatabase : RoomDatabase() {
                 runCatching { database.close() }
                 instance = null
                 appContext.deleteDatabase(EncryptedDatabasePolicy.databaseFileName)
-                instance = buildEncryptedDatabase(appContext)
+                instance = buildEncryptedDatabase(appContext).also { it.openHelper.readableDatabase }
             }
         }
+
+        /**
+         * True only when the failure means "this file cannot be decrypted with the passphrase we
+         * hold" — SQLCipher reports that as a SQLite exception complaining the file is encrypted or
+         * is not a database, and a corrupt-database exception is equally unrecoverable. Matching on
+         * class name rather than type keeps the SQLCipher classes off the JVM unit-test class path.
+         */
+        internal fun isUndecryptableStore(error: Throwable): Boolean =
+            generateSequence(error, Throwable::cause).any { cause ->
+                val name = cause.javaClass.name
+                when {
+                    name.endsWith("SQLiteDatabaseCorruptException") -> true
+                    !name.endsWith("SQLiteException") -> false
+                    else -> cause.message.orEmpty().let {
+                        it.contains("not a database", ignoreCase = true) ||
+                            it.contains("file is encrypted", ignoreCase = true)
+                    }
+                }
+            }
 
         private const val TAG = "AppDatabase"
     }
