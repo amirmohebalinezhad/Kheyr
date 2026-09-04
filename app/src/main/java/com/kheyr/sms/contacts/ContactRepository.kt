@@ -4,10 +4,13 @@ import android.Manifest
 import android.content.ContentUris
 import android.content.Context
 import android.content.pm.PackageManager
+import android.database.ContentObserver
 import android.net.Uri
+import android.os.SystemClock
 import android.provider.ContactsContract
 import androidx.core.content.ContextCompat
 import com.kheyr.sms.data.SmsThread
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -19,11 +22,9 @@ data class DeviceContact(
 )
 
 class ContactRepository(private val context: Context) {
-    @Volatile
-    private var cachedContactData: CachedContactData? = null
 
     fun invalidateCache() {
-        cachedContactData = null
+        clearContactCache()
     }
 
     fun hasContactsPermission(): Boolean =
@@ -109,9 +110,10 @@ class ContactRepository(private val context: Context) {
     )
 
     private suspend fun getContactData(): CachedContactData {
-        cachedContactData?.let { return it }
+        ensureContactObserver(context)
+        cachedContactDataOrNull()?.let { return it }
         val built = buildContactData()
-        cachedContactData = built
+        storeContactData(built)
         return built
     }
 
@@ -158,15 +160,17 @@ class ContactRepository(private val context: Context) {
 
     private fun loadPhotoUriByContactId(): Map<Long, Uri> {
         val photos = mutableMapOf<Long, Uri>()
+        // Avatars render at 40-54dp, so the thumbnail is plenty; PHOTO_URI is the full-resolution
+        // image and made every row decode a large bitmap.
         context.contentResolver.query(
             ContactsContract.Contacts.CONTENT_URI,
-            arrayOf(ContactsContract.Contacts._ID, ContactsContract.Contacts.PHOTO_URI),
+            arrayOf(ContactsContract.Contacts._ID, ContactsContract.Contacts.PHOTO_THUMBNAIL_URI),
             "${ContactsContract.Contacts.HAS_PHONE_NUMBER} = 1",
             null,
             null,
         )?.use { cursor ->
             val idCol = cursor.getColumnIndexOrThrow(ContactsContract.Contacts._ID)
-            val photoCol = cursor.getColumnIndexOrThrow(ContactsContract.Contacts.PHOTO_URI)
+            val photoCol = cursor.getColumnIndexOrThrow(ContactsContract.Contacts.PHOTO_THUMBNAIL_URI)
             while (cursor.moveToNext()) {
                 val photo = cursor.getString(photoCol)?.takeIf { it.isNotBlank() } ?: continue
                 photos[cursor.getLong(idCol)] = Uri.parse(photo)
@@ -193,6 +197,64 @@ class ContactRepository(private val context: Context) {
             val contactId = cursor.getLong(1)
             val photo = cursor.getString(2)?.takeIf { it.isNotBlank() }?.let(Uri::parse)
             ContactProfile(displayName = name, photoUri = photo, contactId = contactId)
+        }
+    }
+
+    internal companion object {
+        // Contact data is cached at process scope: ContactRepository is constructed fresh at several
+        // call sites (the shell, the notifier, the receive pipeline), so a per-instance cache would
+        // almost never be hit. The cache is written from background threads and cleared from the
+        // ContentObserver's binder thread, so every access goes through this lock.
+        private val cacheLock = Any()
+        private var cachedContactData: CachedContactData? = null
+        private var cachedAtElapsedMillis: Long = 0L
+        private val contactObserverRegistered = AtomicBoolean(false)
+
+        // Belt and braces in case the observer never fires (some OEM providers are stingy with
+        // change notifications): the cache goes stale on its own after this long.
+        private const val CACHE_TTL_MILLIS: Long = 5 * 60 * 1000L
+
+        private fun clearContactCache() {
+            synchronized(cacheLock) {
+                cachedContactData = null
+                cachedAtElapsedMillis = 0L
+            }
+        }
+
+        private fun cachedContactDataOrNull(): CachedContactData? = synchronized(cacheLock) {
+            val cached = cachedContactData ?: return@synchronized null
+            if (SystemClock.elapsedRealtime() - cachedAtElapsedMillis >= CACHE_TTL_MILLIS) {
+                cachedContactData = null
+                cachedAtElapsedMillis = 0L
+                return@synchronized null
+            }
+            cached
+        }
+
+        private fun storeContactData(data: CachedContactData) {
+            synchronized(cacheLock) {
+                cachedContactData = data
+                cachedAtElapsedMillis = SystemClock.elapsedRealtime()
+            }
+        }
+
+        /** True while the process-wide contact cache holds usable data. Test seam only. */
+        internal fun isContactCacheWarm(): Boolean = cachedContactDataOrNull() != null
+
+        private fun ensureContactObserver(context: Context) {
+            // Registered at most once per process, and deliberately never unregistered: the cache it
+            // protects is process-scoped, so the process is the observer's correct lifetime.
+            if (!contactObserverRegistered.compareAndSet(false, true)) return
+            val observer = object : ContentObserver(null) {
+                override fun onChange(selfChange: Boolean) {
+                    clearContactCache()
+                }
+            }
+            context.applicationContext.contentResolver.registerContentObserver(
+                ContactsContract.Contacts.CONTENT_URI,
+                true,
+                observer,
+            )
         }
     }
 }
