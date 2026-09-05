@@ -10,13 +10,14 @@ Severity scale: **Critical** = nothing ships / crash loop, **High** = feature do
 **Status.** All of these have since been fixed on this branch except B-24, which is deliberately deferred
 (applying downloaded sync changes needs decryption, merge semantics and a live backend to validate against).
 Three further bugs found while fixing the rest are recorded below as B-38 to B-40, and four more that the
-fixes themselves introduced — caught by an adversarial review of the branch diff — as B-41 to B-44. B-41
-is worth reading even if nothing else here is: the fix for a data-loss bug created a worse one, in which
-a message the user sent went out over the air and never appeared in the conversation.
+fixes themselves introduced — caught by two adversarial reviews of the branch diff — as B-41 to B-45.
+B-41 is worth reading even if nothing else here is: the fix for a data-loss bug created a worse one, in
+which a message the user sent went out over the air and never appeared in the conversation. Reviewing
+the fixes turned out to matter as much as writing them.
 
 Each entry keeps its original description so the reasoning behind the fix stays readable; the **Status**
 column above says what was actually done. Fixing the list took the unit suite from a source set that did
-not compile to **219 passing tests**, `:app:lintDebug` to zero errors, and `:app:assembleDebug` back to
+not compile to **224 passing tests**, `:app:lintDebug` to zero errors, and `:app:assembleDebug` back to
 producing an APK.
 
 ## Summary
@@ -764,6 +765,58 @@ queued sync delete events uploaded and the restored rows were never re-queued.
 - **Database recovery stranded its own DAOs.** Swapping the `AppDatabase` singleton would leave a DAO
   already captured by `SmsRepository` bound to a closed database, crashing the launch the recovery
   exists to heal. It reopens underneath the same instance instead.
+
+<a id="b-45"></a>
+### B-45. Second review round: the rest of the diff (High)
+
+The first review reached only the data layer and the receivers before it was cut short. A second pass
+covered sync, the shell, the widgets, the build config, the tests and the cross-group seams. The
+serious findings were again in the fixes rather than in the original code.
+
+- **A send that threw left the message dead (High).** `persistOutgoing`/`markSending` had already
+  stored the row as "sending", but `send()` threw before the telephony stack accepted it, so no
+  `PendingIntent` was ever registered and `SmsSendStatusReceiver` could never resolve it. Because
+  `showRetry` keys off `MessageStatus.Failed`, the bubble spun on "Sending" forever with no way to
+  retry — and the retry path was worse, turning a retryable Failed message into a permanent Sending.
+  Both catches now mark the row failed and reload.
+- **Backgrounded messages were silently marked read (High).** The mark-read added alongside B-33 keyed
+  off `selectedThread`, which survives backgrounding because the composition is not destroyed. A
+  message arriving while the user was in another app was marked read in Room *and* in the system store
+  before they had seen it. Now gated on `ActiveConversation`, which `ON_STOP` already clears.
+- **The backup rules had a seam (High).** They were written one commit before `SmsRepository`
+  introduced its tombstone preferences file, so the tombstones were backed up while the database they
+  refer to was excluded. On a restored phone the provider reassigns rowids, and every restored SMS
+  whose new id collided with a stale tombstone would be silently and permanently hidden. Excluded now,
+  along with the multipart send-progress file, which is keyed the same way.
+  The invariant is written into both rule files: **state keyed by row ids must be excluded together
+  with the database that gave those ids meaning, never independently of it.**
+- **B-41 was still open on two paths.** The desktop relay and respond-via-message never imported the
+  row they had just written, so a reused rowid could still swallow the message there.
+- **Sign-out leaked one account's messages to the next (Medium).** Queued events holding plaintext
+  bodies survived sign-out and would upload under whoever signed in next. The queue and cursor are
+  cleared now.
+- **Disabling sync never re-armed the backfill (Medium).** Everything received while sync was off
+  stayed permanently absent from the cloud.
+- **The message upload dropped most of its fields (Medium).** Timestamp, direction, status and hashed
+  address were all discarded, so a receiving device would render every synced message as "incoming,
+  received now".
+- **Blocking usually missed (Medium).** The block list stored the raw thread address while the receiver
+  checks the carrier's formatting of the same number. Keyed by `PhoneNumberNormalizer.matchKey` now,
+  with tests.
+- **Smaller ones:** the SIM badge was drawn on single-SIM phones, where it says the same thing on every
+  row and steals width from the preview; `sms:` bodies were percent-decoded twice, corrupting any body
+  containing an escaped `&` or `%`; and the sync worker stamped "last synced" even on a failed upload.
+
+### Checked and not a bug
+
+- **`type NOT IN (3, 0)` excluding NULL-type provider rows.** Reported as silently dropping messages.
+  It does not: `cursor.getInt` returns 0 for a NULL column and `isImportableType(0)` is already false,
+  so those rows are skipped identically either way.
+- **"The real send path enqueues nothing for sync."** Reported as outgoing messages never syncing.
+  `markSent`/`markFailed` enqueue via `enqueueMessageChangeByTelephonyId` moments later, so they do
+  reach the queue. The related test criticism stands — `insertOutgoingSms` and `updateSendStatus` have
+  no production callers and their test proves nothing about the real path — but the functional claim
+  does not.
 
 ### Still open from that review (Low)
 

@@ -57,7 +57,10 @@ class MainActivity : ComponentActivity() {
         if (scheme !in SMS_SCHEMES) return null
         // "sms:+15551234?body=hi" is an opaque URI, so Uri.getQuery() is null and the query rides
         // along in the scheme-specific part; split it off by hand.
-        val schemeSpecificPart = data.schemeSpecificPart.orEmpty()
+        // The ENCODED form: Uri.schemeSpecificPart is already percent-decoded, so decoding the pieces
+        // again below would corrupt any body containing an escaped '&' or '%' - "%26" would become a
+        // real '&' and split the query in the wrong place.
+        val schemeSpecificPart = data.encodedSchemeSpecificPart.orEmpty()
         // Some senders write the hierarchical "sms://+15551234" form, which keeps the slashes here.
         val recipients = schemeSpecificPart.substringBefore('?').removePrefix("//")
         val query = schemeSpecificPart.substringAfter('?', "")

@@ -13,7 +13,9 @@ class ThreadRowPresentationMapper {
         },
         showPinned = thread.isPinned,
         showMuted = thread.isMuted,
-        simBadge = SimBadgeResolver.badge(thread.simSlot, activeSims),
+        // Only worth showing when there is a choice to disambiguate. On a single-SIM phone the badge
+        // would sit on every row saying the same thing, stealing width from the message preview.
+        simBadge = if (activeSims.size > 1) SimBadgeResolver.badge(thread.simSlot, activeSims) else null,
         showSpamBadge = folder == ThreadFolder.Spam && thread.isSpam,
     )
 

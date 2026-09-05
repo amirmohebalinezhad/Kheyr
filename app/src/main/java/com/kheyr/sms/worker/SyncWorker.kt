@@ -39,11 +39,11 @@ class SyncWorker(appContext: Context, params: WorkerParameters) : CoroutineWorke
             .getOrElse { return Result.retry() }
         val encryptor = SmsBodyEncryptor(encryptionKey)
         val uploader = SyncUploader({ syncSettings }, queueStore, api, encryptor)
-        uploader.uploadPending()
-        // Only record success for upload-capable runs. When sync is enabled but the device is not yet
-        // paired, canUpload is false and uploadPending() is a no-op, so recording would make a skipped
-        // run look successful and mask the pending setup state.
-        if (syncSettings.canUpload) {
+        val uploaded = uploader.uploadPending()
+        // Only stamp on a CONFIRMED upload. uploadPending returns 0 both when the upload failed and
+        // when there was nothing queued; in neither case has anything newly succeeded, and stamping
+        // on a failed run would show the user a fresh "last synced" time while their queue backs up.
+        if (syncSettings.canUpload && uploaded > 0) {
             preferences.saveSyncSettings(syncSettings.copy(lastSuccessfulUploadAt = Instant.now()))
         }
 
