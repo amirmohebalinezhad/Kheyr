@@ -7,47 +7,57 @@ to that commit.
 Severity scale: **Critical** = nothing ships / crash loop, **High** = feature does not work or loses data,
 **Medium** = wrong behaviour users will notice, **Low** = robustness, polish, dead code.
 
+**Status.** All of these have since been fixed on this branch except B-24, which is deliberately deferred
+(applying downloaded sync changes needs decryption, merge semantics and a live backend to validate against).
+Three further bugs found while fixing the rest are recorded below as B-38 to B-40. Each entry keeps its
+original description so the reasoning behind the fix stays readable; the **Status** column above says what
+was actually done. Fixing the list took the unit suite from a source set that did not compile to **218
+passing tests**, and `:app:assembleDebug` produces an APK again.
+
 ## Summary
 
-| ID | Severity | Area | Title |
-| --- | --- | --- | --- |
-| [B-01](#b-01) | Critical | Build | `SmsDao` declares `syncedTelephonyIdsInRange` four times, so the app does not compile |
-| [B-02](#b-02) | High | CI | CI build depends on the Aliyun Maven mirror and fails when it returns 502 |
-| [B-03](#b-03) | High | Sync | Nothing ever writes to the sync queue, so sync never uploads a message |
-| [B-04](#b-04) | High | Account | Access token is never refreshed; every authenticated feature dies after one hour |
-| [B-05](#b-05) | High | Storage | Cloud backup restore (or Keystore invalidation) turns into a crash loop on launch |
-| [B-06](#b-06) | High | Sync | A failed upload deletes the queued events instead of retrying them |
-| [B-07](#b-07) | Medium | Dates | Jalali dates are one day early for March 1 to December 31 of every Gregorian leap year |
-| [B-08](#b-08) | Medium | Dual SIM | Incoming SMS store the SIM *slot index* in the column the app reads as a *subscription id* |
-| [B-09](#b-09) | Medium | Composer | After a failed send the Send button stays disabled until the chat is reopened |
-| [B-10](#b-10) | Medium | Composer | Retrying a failed message has no error handling and can crash the app |
-| [B-11](#b-11) | Medium | Settings | "Delete cloud data" and "Export cloud data" always fail (network call on the main thread) |
-| [B-12](#b-12) | Medium | Intents | `sms:` / `smsto:` links open the inbox instead of a conversation with the recipient |
-| [B-13](#b-13) | Medium | Delete | Deleting a chat while not the default SMS app brings it back on the next refresh |
-| [B-14](#b-14) | Medium | Delete | "Undo" after deleting a chat restores only the app copy; the system SMS rows are already gone |
-| [B-15](#b-15) | Medium | Onboarding | Onboarding dead-ends when contacts or notification permission is permanently denied |
-| [B-16](#b-16) | Medium | Permissions | No way to recover when SMS permission or the default-SMS role is lost after onboarding |
-| [B-17](#b-17) | Medium | Receive | Incoming SMS are dated with the carrier timestamp, so delayed messages sort into the past |
-| [B-18](#b-18) | Medium | Spam | "Auto-delete spam after N days" setting does nothing |
-| [B-19](#b-19) | Medium | Blocking | Blocked-sender suppression exists but nothing can block a sender |
-| [B-20](#b-20) | Medium | Account | Logging out of the optional sync account forces the whole onboarding again |
-| [B-21](#b-21) | Medium | Dual SIM | SIM badge is computed for thread rows but never drawn |
-| [B-22](#b-22) | Low | Receive | The `SecurityException` guard around telephony sync does not cover the new gap-window query |
-| [B-23](#b-23) | Medium | Spam | Any spam-scored message re-flags the whole thread, overriding the user's "Not spam" |
-| [B-24](#b-24) | Low | Sync | Downloaded sync changes are counted, then thrown away |
-| [B-25](#b-25) | Low | Sync | Sync cursor is put in the URL without encoding |
-| [B-26](#b-26) | Low | Spam | Unknown rule type from the server throws inside `SpamRulesWorker` |
-| [B-27](#b-27) | Low | Send | `SmsSendStatusReceiver` worker thread has no exception guard |
-| [B-28](#b-28) | Low | Send | Delivery reports are treated as "delivered" without reading the report status |
-| [B-29](#b-29) | Low | Import | Drafts from other SMS apps are imported as outgoing messages with status Received |
-| [B-30](#b-30) | Low | Data | Re-syncing an existing message resets the thread row (`displayName`, `createdAt`) |
-| [B-31](#b-31) | Low | Contacts | Contact name cache is never invalidated while the process lives |
-| [B-32](#b-32) | Low | UI | Thread rows decode the full-size contact photo for every avatar |
-| [B-33](#b-33) | Low | UI | Notification is still posted for the conversation currently on screen |
-| [B-34](#b-34) | Low | UI | Call button is shown for alphanumeric senders (dials `tel:VERIFY`) |
-| [B-35](#b-35) | Low | UI | Search highlighting can index past the end of the string for some Unicode input |
-| [B-36](#b-36) | Low | Docs | `AGENTS.md` describes failures that no longer match the code |
-| [B-37](#b-37) | High | Tests | Unit-test source set does not compile (test for a class deleted in `c924f87`) |
+| ID | Severity | Area | Title | Status |
+| --- | --- | --- | --- | --- |
+| [B-01](#b-01) | Critical | Build | `SmsDao` declares `syncedTelephonyIdsInRange` four times, so the app does not compile | fixed |
+| [B-02](#b-02) | High | CI | CI build depends on the Aliyun Maven mirror and fails when it returns 502 | fixed |
+| [B-03](#b-03) | High | Sync | Nothing ever writes to the sync queue, so sync never uploads a message | fixed |
+| [B-04](#b-04) | High | Account | Access token is never refreshed; every authenticated feature dies after one hour | fixed |
+| [B-05](#b-05) | High | Storage | Cloud backup restore (or Keystore invalidation) turns into a crash loop on launch | fixed |
+| [B-06](#b-06) | High | Sync | A failed upload deletes the queued events instead of retrying them | fixed |
+| [B-07](#b-07) | Medium | Dates | Jalali dates are one day early for March 1 to December 31 of every Gregorian leap year | fixed |
+| [B-08](#b-08) | Medium | Dual SIM | Incoming SMS store the SIM *slot index* in the column the app reads as a *subscription id* | fixed |
+| [B-09](#b-09) | Medium | Composer | After a failed send the Send button stays disabled until the chat is reopened | fixed |
+| [B-10](#b-10) | Medium | Composer | Retrying a failed message has no error handling and can crash the app | fixed |
+| [B-11](#b-11) | Medium | Settings | "Delete cloud data" and "Export cloud data" always fail (network call on the main thread) | fixed |
+| [B-12](#b-12) | Medium | Intents | `sms:` / `smsto:` links open the inbox instead of a conversation with the recipient | fixed |
+| [B-13](#b-13) | Medium | Delete | Deleting a chat while not the default SMS app brings it back on the next refresh | fixed |
+| [B-14](#b-14) | Medium | Delete | "Undo" after deleting a chat restores only the app copy; the system SMS rows are already gone | fixed |
+| [B-15](#b-15) | Medium | Onboarding | Onboarding dead-ends when contacts or notification permission is permanently denied | fixed |
+| [B-16](#b-16) | Medium | Permissions | No way to recover when SMS permission or the default-SMS role is lost after onboarding | fixed |
+| [B-17](#b-17) | Medium | Receive | Incoming SMS are dated with the carrier timestamp, so delayed messages sort into the past | fixed |
+| [B-18](#b-18) | Medium | Spam | "Auto-delete spam after N days" setting does nothing | fixed |
+| [B-19](#b-19) | Medium | Blocking | Blocked-sender suppression exists but nothing can block a sender | fixed |
+| [B-20](#b-20) | Medium | Account | Logging out of the optional sync account forces the whole onboarding again | fixed |
+| [B-21](#b-21) | Medium | Dual SIM | SIM badge is computed for thread rows but never drawn | fixed |
+| [B-22](#b-22) | Low | Receive | The `SecurityException` guard around telephony sync does not cover the new gap-window query | fixed |
+| [B-23](#b-23) | Medium | Spam | Any spam-scored message re-flags the whole thread, overriding the user's "Not spam" | fixed |
+| [B-24](#b-24) | Low | Sync | Downloaded sync changes are counted, then thrown away | not fixed |
+| [B-25](#b-25) | Low | Sync | Sync cursor is put in the URL without encoding | fixed |
+| [B-26](#b-26) | Low | Spam | Unknown rule type from the server throws inside `SpamRulesWorker` | fixed |
+| [B-27](#b-27) | Low | Send | `SmsSendStatusReceiver` worker thread has no exception guard | fixed |
+| [B-28](#b-28) | Low | Send | Delivery reports are treated as "delivered" without reading the report status | fixed |
+| [B-29](#b-29) | Low | Import | Drafts from other SMS apps are imported as outgoing messages with status Received | fixed |
+| [B-30](#b-30) | Low | Data | Re-syncing an existing message resets the thread row (`displayName`, `createdAt`) | fixed |
+| [B-31](#b-31) | Low | Contacts | Contact name cache is never invalidated while the process lives | fixed |
+| [B-32](#b-32) | Low | UI | Thread rows decode the full-size contact photo for every avatar | fixed |
+| [B-33](#b-33) | Low | UI | Notification is still posted for the conversation currently on screen | fixed |
+| [B-34](#b-34) | Low | UI | Call button is shown for alphanumeric senders (dials `tel:VERIFY`) | fixed |
+| [B-35](#b-35) | Low | UI | Search highlighting can index past the end of the string for some Unicode input | fixed |
+| [B-36](#b-36) | Low | Docs | `AGENTS.md` describes failures that no longer match the code | fixed |
+| [B-37](#b-37) | High | Tests | Unit-test source set does not compile (test for a class deleted in `c924f87`) | fixed |
+| [B-38](#b-38) | Low | CI | Job-summary step runs the artifact name as a shell command | fixed |
+| [B-39](#b-39) | High | Build | No Gradle heap configured, so dex merging dies with OutOfMemoryError | fixed |
+| [B-40](#b-40) | Medium | UI | The per-thread action menu is dead UI: `showThreadMenu` is never assigned | fixed |
 
 ---
 
@@ -622,6 +632,68 @@ test passes, and the suite has 174 tests (once it compiles again, see B-37). The
 
 ---
 
+## Found while fixing the list
+
+<a id="b-38"></a>
+### B-38. The CI job summary executes the artifact name (Low)
+
+`.github/workflows/android-apk.yml` (step "Write install instructions to job summary")
+
+The step wrote its markdown with backticks inside a double-quoted bash string:
+
+```bash
+echo "Download the artifact named `kheyr-debug-apk-${{ github.sha }}`, unzip it, ..."
+```
+
+Bash performs command substitution inside double quotes, so it tried to *execute*
+`kheyr-debug-apk-<sha>` as a command and spliced its (empty) output into the summary. The install
+instructions came out mangled on every run.
+
+**Fixed:** emit the summary from a heredoc with the markdown backticks escaped, and pass the artifact
+name through an environment variable.
+
+<a id="b-39"></a>
+### B-39. No Gradle heap is configured, so dex merging runs out of memory (High)
+
+`gradle.properties`
+
+`gradle.properties` contained only `android.useAndroidX=true`, leaving the build JVM on its default
+heap. Once B-01 was fixed and compilation got far enough to matter, `:app:mergeExtDexDebug` failed on
+CI with `OutOfMemoryError: Java heap space` inside R8/D8, so the workflow still produced no APK:
+
+```
+Execution failed for task ':app:mergeExtDexDebug'.
+> com.android.builder.dexing.DexArchiveMergerException: Error while merging dex archives:
+Caused by: java.lang.OutOfMemoryError: Java heap space
+```
+
+The app's external dependencies (Compose, SignalR with RxJava, Firebase, ZXing) are simply more than
+the default heap can merge. This is invisible to `compileDebugKotlin` and to the unit tests, which is
+why it only appeared once the build got past the compiler.
+
+**Fixed:** set `org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1024m` (and a 2 GB Kotlin daemon
+heap). GitHub's `ubuntu-latest` runners have 16 GB. Verified by building a 27 MB `app-debug.apk`.
+
+<a id="b-40"></a>
+### B-40. The per-thread action menu is unreachable (Medium)
+
+`app/src/main/java/com/kheyr/sms/ui/KheyrAppShell.kt` (`showThreadMenu`, `ThreadActionDialog`)
+
+`ThreadActionDialog` renders Pin, Mark read, Archive, Mark spam, Mute and Delete for a single thread,
+and is driven by `showThreadMenu`. Nothing ever assigned that state: `showThreadMenu` was only ever
+read and set back to null. The whole dialog was dead code, so the per-thread menu the PRD describes
+(11.2.2 "Long-press actions") could not be opened at all. Long-press instead starts multi-select,
+whose toolbar covers most of the same actions, which is why the gap was easy to miss.
+
+This also blocked the fix for B-19: adding Block to that dialog alone would have left it just as
+unreachable.
+
+**Fixed:** a second long-press on the single selected row opens its menu, which now also carries
+Block/Unblock. Worth a second opinion on the exact entry point - the alternative is to move Block
+into the existing multi-select overflow and delete the dialog.
+
+---
+
 ## Not bugs, but worth knowing
 
 - **MMS is silently discarded.** `MmsReceiver` is a no-op and the manifest does not request
@@ -674,3 +746,27 @@ test passes, and the suite has 174 tests (once it compiles again, see B-37). The
   366 of leap years.
 - **Environment:** Gradle 8.14.3, JDK 21, Android SDK platform 35, Robolectric SDK 34 (CI uses JDK 17; the
   Kotlin errors are the same either way).
+
+## Appendix: how the fixes were verified
+
+- **The suite grew from a source set that would not compile to 218 passing tests**, and
+  `:app:assembleDebug` packages a 27 MB `app-debug.apk`. Both were run after every group of fixes, not
+  only at the end.
+- **CI is green**, and now actually runs the tests: the workflow gained a `:app:testDebugUnitTest` step,
+  so the class of failure that hid B-37 for months cannot recur silently.
+- **B-07** was re-checked the same way it was found: the corrected Kotlin was ported back to Python and
+  compared against `jdatetime` for every day from 2000 to 2099. It now matches on all 36,525 days, where
+  the original missed 7,650. The four leap-year cases are also pinned in `JalaliDateFormatterTest`.
+- **B-23** ships a schema change, so `AppDatabaseMigrationTest` builds a real v2 database from the
+  committed `2.json`, runs `MIGRATION_2_3` and lets Room re-validate the result against the v3 entities.
+  It also pins the behaviour the column exists for. Worth stating because it is easy to get wrong: the
+  migration adds the column with `DEFAULT 0` while a fresh v3 table has no SQL default, and Room only
+  compares defaults when the entity declares one.
+- **B-05** turned out to need a second pass. The first fix caught `Throwable` and deleted the SMS store on
+  any open failure, which would have converted a forgotten migration into silent data loss for every user
+  on upgrade. Recovery is now limited to a store that genuinely cannot be decrypted, with
+  `AppDatabaseRecoveryTest` covering the missing-migration and full-disk cases that must never delete.
+- **Not verified on a device.** There is no emulator here (no KVM), so nothing UI-facing has been run
+  against a real screen: the B-16 permission banner, the B-21 SIM badge, the B-19/B-40 long-press entry
+  point and the B-12 `sms:` deep link are all reasoned from the code and covered only by unit tests where
+  the logic is pure. Those are the first things to exercise by hand on a phone.
