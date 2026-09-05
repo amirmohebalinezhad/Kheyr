@@ -15,12 +15,25 @@ interface SyncQueueStore {
 }
 
 interface SyncApiClient {
-    fun upload(payloads: List<SyncUploadDto>)
+    /**
+     * Returns true only when the backend confirmed the upload. A false result must leave the queue
+     * rows untouched so the next run retries them instead of dropping the events (B-06).
+     */
+    fun upload(payloads: List<SyncUploadDto>): Boolean
 }
 
 fun interface SyncLogger {
     fun info(message: String)
 }
+
+/**
+ * What one drain of the queue achieved.
+ *
+ * [uploaded] counts only events the backend confirmed. [rejected] separates "the upload was tried
+ * and refused" from "there was nothing to send", which a bare count cannot express: both leave
+ * [uploaded] at 0, but only the first is a failure the caller should retry with backoff (B-48).
+ */
+data class SyncUploadOutcome(val uploaded: Int, val rejected: Boolean = false)
 
 class SyncUploader(
     private val settingsProvider: () -> SyncSettings,
@@ -29,11 +42,11 @@ class SyncUploader(
     private val encryptor: SmsBodyEncryptor,
     private val logger: SyncLogger = SyncLogger { },
 ) {
-    fun uploadPending(limit: Int = 100): Int {
+    fun uploadPending(limit: Int = 100): SyncUploadOutcome {
         val settings = settingsProvider()
         if (!settings.canUpload) {
             logger.info("Sync upload skipped because sync is disabled or device is unpaired")
-            return 0
+            return SyncUploadOutcome(0)
         }
 
         // EncryptedFieldPolicy marks "address" as protected, so the recipient number is salted-hashed
@@ -49,15 +62,18 @@ class SyncUploader(
         if (payloads.isEmpty()) {
             // Nothing to upload, but skipped pre-sync deletions still occupy rows; drop them.
             if (skippedDeletedBackfillIds.isNotEmpty()) queueStore.deleteUploaded(skippedDeletedBackfillIds)
-            return 0
+            return SyncUploadOutcome(0)
         }
 
-        apiClient.upload(payloads)
-        // Delete only after a confirmed successful upload so retry semantics (pending() returns
-        // rows that are still present) keep working when upload fails.
+        if (!apiClient.upload(payloads)) {
+            // Delete only after a confirmed successful upload so retry semantics (pendingRecords()
+            // returns rows that are still present) keep working when upload fails.
+            logger.info("Sync upload failed; ${payloads.size} event(s) stay queued for the next run")
+            return SyncUploadOutcome(0, rejected = true)
+        }
         queueStore.deleteUploaded(payloads.map { it.queueId } + skippedDeletedBackfillIds)
         logger.info("Uploaded ${payloads.size} encrypted sync event(s)")
-        return payloads.size
+        return SyncUploadOutcome(payloads.size)
     }
 
     private fun toUploadDto(record: SyncQueueRecord, addressHasher: PhoneIdentifierHasher): SyncUploadDto? = when (record) {

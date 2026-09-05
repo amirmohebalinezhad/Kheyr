@@ -10,6 +10,7 @@ import java.util.concurrent.TimeUnit
 object KheyrWorkerScheduler {
     private const val SYNC_WORK = "kheyr_sync"
     private const val SPAM_RULES_WORK = "kheyr_spam_rules"
+    private const val SPAM_CLEANUP_WORK = "kheyr_spam_cleanup"
 
     fun scheduleAll(context: Context, syncEnabled: Boolean) {
         val workManager = WorkManager.getInstance(context)
@@ -21,5 +22,9 @@ object KheyrWorkerScheduler {
         }
         val spamRequest = PeriodicWorkRequestBuilder<SpamRulesWorker>(6, TimeUnit.HOURS).build()
         workManager.enqueueUniquePeriodicWork(SPAM_RULES_WORK, ExistingPeriodicWorkPolicy.UPDATE, spamRequest)
+        // Spam retention is a per-day setting, so a daily pass is enough; the worker itself is a no-op
+        // while "auto-delete spam" is 0 ("never"), which keeps the schedule independent of the slider (B-18).
+        val spamCleanupRequest = PeriodicWorkRequestBuilder<SpamCleanupWorker>(1, TimeUnit.DAYS).build()
+        workManager.enqueueUniquePeriodicWork(SPAM_CLEANUP_WORK, ExistingPeriodicWorkPolicy.UPDATE, spamCleanupRequest)
     }
 }

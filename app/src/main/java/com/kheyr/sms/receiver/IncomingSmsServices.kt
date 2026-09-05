@@ -50,13 +50,17 @@ class RoomIncomingSmsStore(
     private val markSpam: Boolean,
     private val ownNumberResolver: OwnNumberResolver,
 ) : SpamMessageStore, InboxMessageStore {
-    override fun persistSpam(message: IncomingSms, score: Int, triggeredRuleIds: List<String>) {
-        persist(message, spam = true)
+    override fun persistSpam(message: IncomingSms, score: Int, triggeredRuleIds: List<String>): SpamPersistOutcome {
+        // Default true: if the own-number short circuit in persist() returns before classifying, the
+        // message is one of our own and is suppressed anyway.
+        var treatedAsSpam = true
+        val stored = persist(message, spam = true) { treatedAsSpam = it }
+        return SpamPersistOutcome(stored, treatedAsSpam)
     }
 
-    override fun persistInbox(message: IncomingSms): StoredIncomingSms = persist(message, spam = false)
+    override fun persistInbox(message: IncomingSms): StoredIncomingSms = persist(message, spam = false) {}
 
-    private fun persist(message: IncomingSms, spam: Boolean): StoredIncomingSms {
+    private fun persist(message: IncomingSms, spam: Boolean, onSpamFlagged: (Boolean) -> Unit): StoredIncomingSms {
         if (!spam && ownNumberResolver.isOwnNumber(message.sender)) {
             runBlocking(Dispatchers.IO) {
                 repository.recentOutgoingThreadId(message.sender, message.body)
@@ -66,6 +70,7 @@ class RoomIncomingSmsStore(
                     message.sender,
                     message.body,
                     message.receivedAtMillis,
+                    message.sentAtMillis,
                     message.simSlot,
                     message.subscriptionId,
                 )
@@ -74,7 +79,10 @@ class RoomIncomingSmsStore(
         val values = ContentValues().apply {
             put(Telephony.Sms.ADDRESS, message.sender)
             put(Telephony.Sms.BODY, message.body)
+            // DATE is the device receive time and DATE_SENT the SMSC timestamp, per the platform
+            // convention; dating the row from the SMSC clock sorts delayed messages into the past.
             put(Telephony.Sms.DATE, message.receivedAtMillis)
+            message.sentAtMillis?.let { put(Telephony.Sms.DATE_SENT, it) }
             put(Telephony.Sms.READ, 0)
             put(Telephony.Sms.TYPE, Telephony.Sms.MESSAGE_TYPE_INBOX)
             message.subscriptionId?.let { put("sub_id", it) }
@@ -93,10 +101,24 @@ class RoomIncomingSmsStore(
             timestamp = Instant.ofEpochMilli(message.receivedAtMillis),
             telephonyId = telephonyId,
             read = false,
-            simSlot = message.simSlot,
+            // The simSlot column holds a subscription id everywhere else (the telephony importer fills
+            // it from sub_id and every reader passes it to getSmsManagerForSubscriptionId), so writing
+            // the physical slot index here would route replies out the wrong SIM.
+            simSlot = message.subscriptionId,
         )
-        if (spam || markSpam) runBlocking(Dispatchers.IO) { repository.updateSpam(threadId, true) }
-        return StoredIncomingSms(threadId, message.sender, message.body, message.receivedAtMillis, message.simSlot, message.subscriptionId)
+        // autoMarkSpam is a no-op once the user has restored the thread with "Not spam", so a later
+        // spam-scoring message cannot hide a conversation the user explicitly corrected. It reports
+        // back whether the thread really is spam now, so the caller can still notify when it is not.
+        if (spam || markSpam) onSpamFlagged(repository.autoMarkSpam(threadId))
+        return StoredIncomingSms(
+            threadId,
+            message.sender,
+            message.body,
+            message.receivedAtMillis,
+            message.sentAtMillis,
+            message.simSlot,
+            message.subscriptionId,
+        )
     }
 
     private fun threadIdForMessageRow(messageRowId: Long): Long? = context.contentResolver.query(
@@ -119,6 +141,9 @@ class PolicyAwareIncomingSmsNotifier(
     // notify() is guarded by canPostNotifications(), which checks POST_NOTIFICATIONS on API 33+.
     @SuppressLint("MissingPermission")
     override fun show(message: StoredIncomingSms, senderIsContact: Boolean) {
+        // The user is already reading this conversation; the message still lands in the open chat via
+        // the persist + refresh-event path, so a heads-up notification would only be noise.
+        if (ActiveConversation.isOpen(message.threadId)) return
         if (!canPostNotifications()) return
         val profile = runBlocking(Dispatchers.IO) { contactRepository.lookupProfile(message.sender) }
         val displayName = profile?.displayName?.takeIf { it.isNotBlank() } ?: message.sender
@@ -246,7 +271,7 @@ class PolicyAwareIncomingSmsNotifier(
         context.contentResolver.openInputStream(photoUri)?.use(BitmapFactory::decodeStream)
     }.getOrNull()
 
-    private fun stableNotificationId(threadId: Long): Int = (threadId xor (threadId ushr 32)).toInt()
+    private fun stableNotificationId(threadId: Long): Int = IncomingSmsNotifications.notificationId(threadId)
 
     private fun ensureChannel() {
         // IMPORTANCE_HIGH is required for heads-up (pop-up) notifications on API 26+. A channel's

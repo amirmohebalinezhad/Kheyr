@@ -28,6 +28,11 @@ class DesktopRelayExecutor(
                 val result = runCatching {
                     val telephonyId = repository.persistOutgoing(resolution.recipient, resolution.body, resolution.subscriptionId)
                     repository.markSending(telephonyId)
+                    // Import the row we just wrote, exactly as the composer does. Without this the
+                    // message reaches Room only through a later discovery sync, which honours delete
+                    // tombstones - and the provider reuses rowids, so a relayed message could be
+                    // dropped for matching an id the user deleted earlier (B-41).
+                    repository.syncTelephonyMessagesByIds(listOf(telephonyId))
                     sender.send(SmsSendRequest(resolution.recipient, resolution.body, resolution.subscriptionId, telephonyId))
                 }
                 if (result.isSuccess) {

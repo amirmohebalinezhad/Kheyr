@@ -3,6 +3,7 @@ package com.kheyr.sms.preferences
 import android.content.Context
 import android.content.SharedPreferences
 import android.net.Uri
+import com.kheyr.sms.contacts.PhoneNumberNormalizer
 import com.kheyr.sms.domain.SpamRule
 import com.kheyr.sms.domain.SpamRuleSet
 import com.kheyr.sms.domain.SpamRuleType
@@ -47,6 +48,14 @@ class AppPreferences(context: Context) {
     var pushToken: String?
         get() = prefs.getString(KEY_PUSH_TOKEN, null)
         set(value) = prefs.edit().apply { if (value == null) remove(KEY_PUSH_TOKEN) else putString(KEY_PUSH_TOKEN, value) }.apply()
+
+    /**
+     * True once the one-off history backfill has been queued for sync (B-03). Reset on sign-out so a
+     * new account backfills again.
+     */
+    var initialBackfillDone: Boolean
+        get() = prefs.getBoolean(KEY_INITIAL_BACKFILL_DONE, false)
+        set(value) = prefs.edit().putBoolean(KEY_INITIAL_BACKFILL_DONE, value).apply()
 
     var spamAutoDeleteDays: Int
         get() = prefs.getInt(KEY_SPAM_AUTO_DELETE_DAYS, 0)
@@ -120,13 +129,26 @@ class AppPreferences(context: Context) {
         )
     }
 
-    fun isBlockedSender(address: String): Boolean = prefs.getStringSet(KEY_BLOCKED_SENDERS, emptySet()).orEmpty().contains(address)
+    /**
+     * Blocked senders are keyed by [PhoneNumberNormalizer.matchKey], not by the raw string. The UI
+     * blocks the address stored on the thread while the receiver checks the address the carrier put
+     * in the PDU, and those differ in formatting far more often than not - an exact string match
+     * would quietly fail to block anyone. matchKey also keeps alphanumeric sender IDs ("VERIFY")
+     * matching case-insensitively without collapsing them together.
+     */
+    fun isBlockedSender(address: String): Boolean =
+        blockedSenderKeys().contains(PhoneNumberNormalizer.matchKey(address))
 
     fun setBlockedSender(address: String, blocked: Boolean) {
-        val current = prefs.getStringSet(KEY_BLOCKED_SENDERS, emptySet()).orEmpty().toMutableSet()
-        if (blocked) current.add(address) else current.remove(address)
+        val key = PhoneNumberNormalizer.matchKey(address)
+        if (key.isBlank()) return
+        val current = blockedSenderKeys().toMutableSet()
+        if (blocked) current.add(key) else current.remove(key)
         prefs.edit().putStringSet(KEY_BLOCKED_SENDERS, current).apply()
     }
+
+    private fun blockedSenderKeys(): Set<String> =
+        prefs.getStringSet(KEY_BLOCKED_SENDERS, emptySet()).orEmpty()
 
     fun syncCursor(): String? = prefs.getString(KEY_SYNC_CURSOR, null)
 
@@ -157,6 +179,7 @@ class AppPreferences(context: Context) {
         private const val KEY_DIRECT_MESSAGES = "direct_messages_enabled"
         private const val KEY_USER_PHONE = "user_phone"
         private const val KEY_PUSH_TOKEN = "push_token"
+        private const val KEY_INITIAL_BACKFILL_DONE = "initial_backfill_done"
         private const val KEY_SPAM_AUTO_DELETE_DAYS = "spam_auto_delete_days"
         private const val KEY_NOTIF_CONTENT = "notif_content_mode"
         private const val KEY_UNKNOWN_SENDER = "unknown_sender_mode"

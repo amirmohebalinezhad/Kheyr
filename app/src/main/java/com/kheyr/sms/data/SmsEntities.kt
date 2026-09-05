@@ -39,6 +39,9 @@ data class ThreadStateEntity(
     val isMuted: Boolean = false,
     val isArchived: Boolean = false,
     val isSpam: Boolean = false,
+    // Records that the user explicitly said "Not spam" for this thread; the automatic spam
+    // classifier must never override that decision (B-23).
+    val userNotSpam: Boolean = false,
 )
 
 @Entity(tableName = "sync_spam_metadata")

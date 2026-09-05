@@ -29,7 +29,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -46,7 +45,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -55,6 +53,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.kheyr.sms.KheyrApplication
 import com.kheyr.sms.R
+import com.kheyr.sms.SendToRequest
 import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import com.kheyr.sms.api.ApiConfig
@@ -73,15 +72,20 @@ import com.kheyr.sms.conversation.ConversationSearchMatcher
 import com.kheyr.sms.contacts.ContactRepository
 import com.kheyr.sms.contacts.DeviceContact
 import com.kheyr.sms.conversation.SearchableMessage
+import com.kheyr.sms.data.AppDatabase
 import com.kheyr.sms.data.SmsMessage
 import com.kheyr.sms.data.SmsRefreshEvents
 import com.kheyr.sms.data.SmsRepository
 import com.kheyr.sms.data.SmsThread
 import com.kheyr.sms.domain.ThreadSorter
+import com.kheyr.sms.onboarding.DefaultRoleMonitorState
 import com.kheyr.sms.onboarding.DefaultSmsRoleChecker
 import com.kheyr.sms.onboarding.OnboardingGateState
 import com.kheyr.sms.onboarding.OnboardingCopy
 import com.kheyr.sms.preferences.AppPreferences
+import androidx.core.app.NotificationManagerCompat
+import com.kheyr.sms.receiver.ActiveConversation
+import com.kheyr.sms.receiver.IncomingSmsNotifications
 import com.kheyr.sms.settings.HelpFeedbackModel
 import com.kheyr.sms.settings.NotificationSettings
 import com.kheyr.sms.settings.SettingsCategory
@@ -118,11 +122,26 @@ private sealed interface InboxPane {
 
 // Captures exactly which messages a deferred delete should remove. Deleting by the snapshot's ids
 // (instead of the whole thread) means messages that arrive while the undo snackbar is visible survive.
-private data class PendingThreadDelete(val threadId: Long, val messageIds: List<Long>)
+private data class PendingThreadDelete(
+    val threadId: Long,
+    // Captured up front: once the Room rows are gone there is no way to look these up again, and they
+    // are what the deferred system-SMS-store delete needs.
+    val telephonyIds: List<Long>,
+)
 
+// The Scaffold's content padding is deliberately ignored: this screen is edge-to-edge and places its
+// own chrome (top bar, bottom nav, conversation bar) as overlays inside a Box, insetting each one via
+// KheyrChromeInsets / statusBarsPadding / navigationBarsPadding. Consuming the Scaffold padding as well
+// would inset the same system bars twice.
+@Suppress("UnusedMaterial3ScaffoldPaddingParameter")
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
-fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {}) {
+fun KheyrAppShell(
+    openThreadId: Long? = null,
+    onThreadConsumed: () -> Unit = {},
+    sendTo: SendToRequest? = null,
+    onSendToConsumed: () -> Unit = {},
+) {
     val context = LocalContext.current
     val app = context.applicationContext as KheyrApplication
     val preferences = app.preferences
@@ -130,7 +149,9 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
     val contactRepository = remember { ContactRepository(context) }
     val simRepository = remember { SimRepository(context) }
     val sender = remember { SmsSender(context) }
-    val api = remember { KheyrApiService(tokenProvider = { preferences.authTokens().first }) }
+    // create() wires the refresh-token retry and token persistence, so every screen here survives
+    // the 60-minute access-token lifetime instead of silently failing after an hour (B-04).
+    val api = remember { KheyrApiService.create(preferences) }
     val screenMapper = remember { ConversationScreenMapper() }
     val composerReducer = remember { SmsComposerStateReducer() }
     val threadRowMapper = remember { ThreadRowPresentationMapper() }
@@ -205,22 +226,44 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
     }
     var sims by remember { mutableStateOf<List<SimCard>>(emptyList()) }
     var resumeNonce by remember { mutableIntStateOf(0) }
+    // Losing the default-SMS role or READ_SMS after onboarding used to leave the inbox with bare
+    // text and no way back (B-16); these drive a dismissible recovery banner above the thread list.
+    var accessBannerDismissed by remember { mutableStateOf(false) }
+    var roleMonitor by remember { mutableStateOf(DefaultRoleMonitorState(isDefaultSms, isDefaultSms)) }
     val activity = context as? ComponentActivity
     DisposableEffect(activity) {
         val lifecycle = activity?.lifecycle ?: return@DisposableEffect onDispose {}
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) {
-                isDefaultSms = DefaultSmsRoleChecker.isDefaultSmsApp(context)
-                smsPermissionGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED
-                contactsPermissionGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
-                if (smsPermissionGranted) {
-                    sims = simRepository.activeSims()
-                    resumeNonce++
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> {
+                    val nowDefaultSms = DefaultSmsRoleChecker.isDefaultSmsApp(context)
+                    val monitor = DefaultRoleMonitorState(wasDefaultSmsApp = isDefaultSms, isDefaultSmsApp = nowDefaultSms)
+                    roleMonitor = monitor
+                    isDefaultSms = nowDefaultSms
+                    smsPermissionGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED
+                    contactsPermissionGranted = ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED
+                    // A role that disappeared while we were in the background is new information, and
+                    // once everything is granted again the next loss has to be able to warn afresh —
+                    // in both cases an earlier dismissal is stale.
+                    if (monitor.shouldWarnRoleRemoved || (isDefaultSms && smsPermissionGranted)) accessBannerDismissed = false
+                    // The receive pipeline reads this from a broadcast thread; restore it on resume so
+                    // the conversation on screen keeps suppressing its own notifications (B-33).
+                    ActiveConversation.setOpen(selectedThread?.id)
+                    if (smsPermissionGranted) {
+                        sims = simRepository.activeSims()
+                        resumeNonce++
+                    }
                 }
+                // Backgrounded means nothing is on screen, so every incoming message may notify again.
+                Lifecycle.Event.ON_STOP -> ActiveConversation.setOpen(null)
+                else -> Unit
             }
         }
         lifecycle.addObserver(observer)
-        onDispose { lifecycle.removeObserver(observer) }
+        onDispose {
+            lifecycle.removeObserver(observer)
+            ActiveConversation.setOpen(null)
+        }
     }
     var notificationSettings by remember { mutableStateOf(preferences.notificationSettings()) }
     var themePreference by remember { mutableStateOf(preferences.themePreference) }
@@ -254,6 +297,12 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
         conversationSearchActive = false
         conversationSearchQuery = ""
         composerState = composerStateForThread(thread)
+        // Tell the receive pipeline which chat is on screen so it skips notifying for it, and clear
+        // any notification already posted for this thread. Suppressing new ones is only half of
+        // B-33: without the cancel, a notification raised a moment earlier stays on screen for a
+        // conversation the user is now reading, and suppression means nothing will ever replace it.
+        ActiveConversation.setOpen(thread.id)
+        NotificationManagerCompat.from(context).cancel(IncomingSmsNotifications.notificationId(thread.id))
         scope.launch {
             // Load the messages before switching screens so the conversation slides in already
             // populated, instead of sliding in empty and popping the bubbles in a frame later.
@@ -265,18 +314,22 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
 
     fun openConversationForRecipient(recipient: NewMessageRecipient) {
         val existing = threads.firstOrNull { contactRepository.matchesAddress(it.address, recipient.address) }
-        val threadId = existing?.id ?: ThreadIdResolver.getOrCreateThreadId(context, recipient.address)
-        openConversation(
-            existing?.copy(displayName = recipient.displayName.ifBlank { existing.displayName }, contactPhotoUri = recipient.photoUri ?: existing.contactPhotoUri)
-                ?: SmsThread(
-                    id = threadId,
-                    address = recipient.address,
-                    displayName = recipient.displayName.ifBlank { recipient.address },
-                    lastMessage = "",
-                    lastMessageAt = Instant.now(),
-                    contactPhotoUri = recipient.photoUri,
-                ),
-        )
+        val target = if (existing != null) {
+            existing.copy(
+                displayName = recipient.displayName.ifBlank { existing.displayName },
+                contactPhotoUri = recipient.photoUri ?: existing.contactPhotoUri,
+            )
+        } else {
+            SmsThread(
+                id = ThreadIdResolver.getOrCreateThreadId(context, recipient.address),
+                address = recipient.address,
+                displayName = recipient.displayName.ifBlank { recipient.address },
+                lastMessage = "",
+                lastMessageAt = Instant.now(),
+                contactPhotoUri = recipient.photoUri,
+            )
+        }
+        openConversation(target)
     }
 
     fun openConversationForContact(contact: DeviceContact) {
@@ -292,6 +345,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                 // the background instead of letting it stall the back animation.
                 val closing = selectedThread
                 selectedThread = null
+                ActiveConversation.setOpen(null)
                 screen = AppScreen.Main
                 conversationSearchActive = false
                 conversationSearchQuery = ""
@@ -369,8 +423,10 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
     suspend fun commitPendingDelete() {
         val pending = pendingDelete ?: return
         pendingDelete = null
-        // Delete only the messages captured at delete time, leaving any that arrived during the undo window.
-        repository.deleteMessagesByIds(pending.messageIds)
+        // The Room rows already went at delete time so the list updated immediately. The system SMS
+        // store is only touched here, once the undo window has closed - that split is what makes Undo
+        // able to give the messages back at all (B-14).
+        repository.deleteTelephonyMessages(pending.telephonyIds)
     }
 
     fun deleteThreadWithUndo(thread: SmsThread) {
@@ -379,11 +435,12 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
             val folder = chatFolder.toThreadFolder()
             val snapshot = repository.loadLocalMessageEntities(thread.id)
             val snapshotIds = snapshot.map { it.id }
-            pendingDelete = PendingThreadDelete(thread.id, snapshotIds)
-            // Delete the snapshot rows now so the optimistic removal matches persisted state. Only
-            // these ids are removed, so messages that arrive during the undo window survive; Undo
-            // re-inserts the snapshot as the sole copies instead of duplicating still-present rows.
-            repository.deleteMessagesByIds(snapshotIds)
+            pendingDelete = PendingThreadDelete(thread.id, snapshot.mapNotNull { it.telephonyId })
+            // Room only, so the optimistic removal matches persisted state while the system SMS rows
+            // stay put until the undo window closes. Only these ids are removed, so messages that
+            // arrive during the window survive; Undo re-inserts the snapshot as the sole copies
+            // instead of duplicating still-present rows.
+            repository.deleteLocalMessagesByIds(snapshotIds)
             threads = ThreadListOptimisticUpdate.applyAction(threads, thread, ThreadBulkAction.Delete)
             threads = ThreadListOptimisticUpdate.filterForFolder(threads, folder)
             if (selectedThread?.id == thread.id) {
@@ -522,6 +579,33 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
         }
     }
 
+    // Shared by onboarding step 1 and the post-onboarding recovery banner (B-16), so both offer the
+    // same route back to the default-SMS role.
+    fun requestDefaultSmsRole() {
+        val roleManager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            context.getSystemService(RoleManager::class.java)
+        } else {
+            null
+        }
+        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && roleManager?.isRoleAvailable(RoleManager.ROLE_SMS) == true) {
+            roleManager.createRequestRoleIntent(RoleManager.ROLE_SMS)
+        } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            Intent(Telephony.Sms.Intents.ACTION_CHANGE_DEFAULT)
+                .putExtra(Telephony.Sms.Intents.EXTRA_PACKAGE_NAME, context.packageName)
+        } else {
+            null
+        }
+        if (intent == null) {
+            openAppPermissionSettings()
+        } else {
+            try {
+                roleLauncher.launch(intent)
+            } catch (_: ActivityNotFoundException) {
+                openAppPermissionSettings()
+            }
+        }
+    }
+
     LaunchedEffect(chatFolder, screen, selectedTab) {
         if (screen == AppScreen.Main && selectedTab == MainTab.Chats) {
             // One sequenced reload (quick local load, then sync, then reload) instead of two
@@ -557,6 +641,15 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                         refreshThreadsLocal()
                     }
                     if (selectedThread?.id == event.threadId) {
+                        // Only mark read when the conversation is genuinely ON SCREEN. selectedThread
+                        // survives backgrounding - the composition is not destroyed by ON_STOP - so
+                        // keying this off it alone marked messages that arrived while the user was in
+                        // another app as read, in Room and in the system store, before they had seen
+                        // them. ActiveConversation is cleared on ON_STOP, which is exactly the
+                        // distinction needed here.
+                        if (ActiveConversation.isOpen(event.threadId)) {
+                            repository.markThreadRead(event.threadId)
+                        }
                         messages = repository.loadLocalMessages(event.threadId)
                         selectedThread = threads.filterOrFind(event.threadId) ?: selectedThread
                     }
@@ -607,6 +700,29 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
         onThreadConsumed()
     }
 
+    // "Message" from a contact card, the dialer, a web sms:/smsto: link, or our own copy-menu action
+    // lands here; open (or create) that recipient's conversation instead of dumping the user on the
+    // inbox, prefilling any shared body (B-12).
+    LaunchedEffect(sendTo) {
+        val request = sendTo ?: return@LaunchedEffect
+        if (!smsPermissionGranted || !preferences.onboardingComplete) {
+            onSendToConsumed()
+            return@LaunchedEffect
+        }
+        val address = request.address
+        if (address == null) {
+            // A bare "sms:" carries no recipient, so let the user pick one rather than do nothing.
+            newMessageQuery = ""
+            screen = AppScreen.NewMessage
+        } else {
+            openConversationForRecipient(NewMessageRecipient(displayName = "", address = address))
+            request.body?.let { body ->
+                composerState = composerReducer.reduce(composerState, SmsComposerEvent.BodyChanged(body))
+            }
+        }
+        onSendToConsumed()
+    }
+
     val showShellTopBar = screen != AppScreen.Onboarding && screen != AppScreen.Conversation && screen != AppScreen.NewMessage
 
     KheyrTheme(themePreference = themePreference) {
@@ -620,36 +736,17 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                         AppScreen.Onboarding -> OnboardingFlow(
                             step = onboardingStep,
                             gate = gateState(),
+                            // Sync uploads to an account, so the toggle stays unavailable until the
+                            // phone number is verified (B-03).
+                            signedIn = preferences.authTokens().first != null,
                             otpPhone = otpPhone,
                             otpCode = otpCode,
                             onStepChange = { onboardingStep = it },
                             onOtpPhoneChange = { otpPhone = it },
                             onOtpCodeChange = { otpCode = it },
-                            onRequestDefault = {
-                                val roleManager = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                    context.getSystemService(RoleManager::class.java)
-                                } else {
-                                    null
-                                }
-                                val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && roleManager?.isRoleAvailable(RoleManager.ROLE_SMS) == true) {
-                                    roleManager.createRequestRoleIntent(RoleManager.ROLE_SMS)
-                                } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
-                                    Intent(Telephony.Sms.Intents.ACTION_CHANGE_DEFAULT)
-                                        .putExtra(Telephony.Sms.Intents.EXTRA_PACKAGE_NAME, context.packageName)
-                                } else {
-                                    null
-                                }
-                                if (intent == null) {
-                                    openAppPermissionSettings()
-                                } else {
-                                    try {
-                                        roleLauncher.launch(intent)
-                                    } catch (_: ActivityNotFoundException) {
-                                        openAppPermissionSettings()
-                                    }
-                                }
-                            },
+                            onRequestDefault = { requestDefaultSmsRole() },
                             onRequestPermissions = { permissionLauncher.launch(requiredPermissions()) },
+                            onOpenSettings = { openAppPermissionSettings() },
                             onSkipSync = { preferences.syncOptInSkipped = true; onboardingStep = 4 },
                             onEnableSync = { syncEnabled = true; preferences.saveSyncSettings(preferences.syncSettings().copy(enabled = true)); KheyrWorkerScheduler.scheduleAll(context, true); onboardingStep = 4 },
                             onVerifyOtp = {
@@ -723,24 +820,32 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                                         onLogout = {
                                             scope.launch(Dispatchers.IO) {
                                                 api.logout()
-                                                clearLocalSession(preferences)
+                                                clearLocalSession(context, preferences)
                                                 withContext(Dispatchers.Main) {
                                                     realtimeClient?.stop()
                                                     statusMessage = "Signed out"
-                                                    onboardingStep = 0
-                                                    screen = AppScreen.Onboarding
+                                                    // Sync is off now, so stop its worker and land back on the
+                                                    // inbox instead of replaying onboarding (B-20).
+                                                    syncEnabled = false
+                                                    KheyrWorkerScheduler.scheduleAll(context, false)
+                                                    screen = AppScreen.Main
+                                                    selectedTab = MainTab.Chats
                                                 }
                                             }
                                         },
                                         onDeleteAccount = {
                                             scope.launch(Dispatchers.IO) {
                                                 api.deleteAccount()
-                                                clearLocalSession(preferences)
+                                                clearLocalSession(context, preferences)
                                                 withContext(Dispatchers.Main) {
                                                     realtimeClient?.stop()
                                                     statusMessage = "Account deleted"
-                                                    onboardingStep = 0
-                                                    screen = AppScreen.Onboarding
+                                                    // Sync is off now, so stop its worker and land back on the
+                                                    // inbox instead of replaying onboarding (B-20).
+                                                    syncEnabled = false
+                                                    KheyrWorkerScheduler.scheduleAll(context, false)
+                                                    screen = AppScreen.Main
+                                                    selectedTab = MainTab.Chats
                                                 }
                                             }
                                         },
@@ -792,6 +897,20 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                                         ThreadFolderScreen(
                                         threads = visibleThreads,
                                         folder = chatFolder.toThreadFolder(),
+                                        banner = {
+                                            // Losing the role or SMS permission after onboarding used to be a
+                                            // dead end: the list just said "Grant SMS access" with no action (B-16).
+                                            if (preferences.onboardingComplete && !accessBannerDismissed && (!isDefaultSms || !smsPermissionGranted)) {
+                                                AccessRecoveryBanner(
+                                                    isDefaultSms = isDefaultSms,
+                                                    smsPermissionGranted = smsPermissionGranted,
+                                                    roleWasRemoved = roleMonitor.shouldWarnRoleRemoved,
+                                                    onMakeDefault = { requestDefaultSmsRole() },
+                                                    onGrantPermission = { permissionLauncher.launch(requiredPermissions()) },
+                                                    onDismiss = { accessBannerDismissed = true },
+                                                )
+                                            }
+                                        },
                                         showFilters = chatFolder == ChatFolder.All,
                                         threadListFilter = threadListFilter,
                                         onThreadListFilterChange = { threadListFilter = it },
@@ -804,7 +923,16 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                                         onThreadClick = { thread ->
                                             if (threadSelection.isSelectionMode) threadSelection = threadSelection.toggle(thread.id) else openConversation(thread)
                                         },
-                                        onThreadLongPress = { thread -> threadSelection = threadSelection.select(thread.id) },
+                                        onThreadLongPress = { thread ->
+                                            // First long-press starts multi-select as before; a second one on the
+                                            // same (only) selected row opens its per-thread menu, which is the
+                                            // dialog's only trigger and therefore the only route to Block (B-19).
+                                            if (threadSelection.selectedThreadIds == setOf(thread.id)) {
+                                                showThreadMenu = thread
+                                            } else {
+                                                threadSelection = threadSelection.select(thread.id)
+                                            }
+                                        },
                                         listState = threadListState,
                                         emptyText = when {
                                             threadsLoading -> "Loading conversations..."
@@ -847,18 +975,26 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                                                     composerState
                                                 }
                                                 val state = composerReducer.reduce(readyState, SmsComposerEvent.SendRequested)
-                                                composerState = state
-                                                if (state.error != null) return@ConversationScreenContent
+                                                if (state.error != null) {
+                                                    composerState = state
+                                                    return@ConversationScreenContent
+                                                }
                                                 if (!isDefaultSms) {
                                                     // A non-default SMS app can't write to the system SMS store, so the
                                                     // send would throw. Guide the user back to the role instead of crashing.
+                                                    // The sending=true state is deliberately NOT published here: nothing
+                                                    // would ever clear it and Send would stay disabled forever (B-09).
                                                     statusMessage = "Set Kheyr as your default SMS app to send messages."
                                                     return@ConversationScreenContent
                                                 }
+                                                composerState = state
                                                 val text = state.body.trim()
                                                 scope.launch {
+                                                    // Hoisted so the catch can resolve a row that was already persisted.
+                                                    var persistedTelephonyId: Long? = null
                                                     try {
                                                         val telephonyId = repository.persistOutgoing(thread.address, text, subscriptionId)
+                                                        persistedTelephonyId = telephonyId
                                                         repository.markSending(telephonyId)
                                                         repository.syncTelephonyMessagesByIds(listOf(telephonyId))
                                                         sender.send(SmsSendRequest(thread.address, text, subscriptionId, telephonyId))
@@ -867,6 +1003,18 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                                                         refreshThreadsLocal()
                                                     } catch (t: Exception) {
                                                         if (t is kotlinx.coroutines.CancellationException) throw t
+                                                        // The row is already stored as "sending", but send() threw before the
+                                                        // telephony stack accepted it, so no PendingIntent was ever registered
+                                                        // and SmsSendStatusReceiver will never resolve it. Left alone the bubble
+                                                        // spins on "Sending" forever with no Retry, because showRetry is driven
+                                                        // by MessageStatus.Failed. Mark it failed so the user can retry.
+                                                        persistedTelephonyId?.let { id ->
+                                                            runCatching { withContext(Dispatchers.IO) { repository.markFailed(id) } }
+                                                        }
+                                                        // BodyChanged clears `error` but not `sending`, so without this the
+                                                        // Send button stays disabled until the chat is reopened (B-09).
+                                                        composerState = composerReducer.reduce(composerState, SmsComposerEvent.SendFailed)
+                                                        messages = repository.loadLocalMessages(thread.id)
                                                         statusMessage = "Couldn't send the message. Make sure Kheyr is your default SMS app."
                                                     }
                                                 }
@@ -874,11 +1022,27 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                                             onRetry = { messageId ->
                                                 val message = messages.firstOrNull { it.id == messageId } ?: return@ConversationScreenContent
                                                 val telephonyId = message.telephonyId ?: return@ConversationScreenContent
+                                                if (!isDefaultSms) {
+                                                    statusMessage = "Set Kheyr as your default SMS app to send messages."
+                                                    return@ConversationScreenContent
+                                                }
                                                 scope.launch {
-                                                    repository.markSending(telephonyId)
-                                                    sender.send(SmsSendRequest(message.address, message.body, message.simSlot, telephonyId))
-                                                    repository.syncTelephonyMessagesByIds(listOf(telephonyId))
-                                                    messages = repository.loadLocalMessages(thread.id)
+                                                    try {
+                                                        repository.markSending(telephonyId)
+                                                        sender.send(SmsSendRequest(message.address, message.body, message.simSlot, telephonyId))
+                                                        repository.syncTelephonyMessagesByIds(listOf(telephonyId))
+                                                        messages = repository.loadLocalMessages(thread.id)
+                                                    } catch (t: Exception) {
+                                                        if (t is kotlinx.coroutines.CancellationException) throw t
+                                                        // send() throws on an undialable recipient or a revoked SEND_SMS;
+                                                        // uncaught here it would kill the process (B-10). markSending has
+                                                        // already moved the row out of Failed, so put it back: otherwise one
+                                                        // failed retry turns a retryable message into a permanent "Sending".
+                                                        runCatching { withContext(Dispatchers.IO) { repository.markFailed(telephonyId) } }
+                                                        composerState = composerReducer.reduce(composerState, SmsComposerEvent.SendFailed)
+                                                        messages = repository.loadLocalMessages(thread.id)
+                                                        statusMessage = "Couldn't send the message. Make sure Kheyr is your default SMS app."
+                                                    }
                                                 }
                                             },
                                         )
@@ -893,18 +1057,59 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                                 notificationSettings = notificationSettings,
                                 themePreference = themePreference,
                                 syncEnabled = syncEnabled,
+                                // Sync uploads to an account; without one the toggle would start a
+                                // 15-minute worker that can never upload anything (B-03).
+                                signedIn = preferences.authTokens().first != null,
                                 defaultSub = preferences.defaultSubscriptionId,
                                 sims = sims,
                                 directMessagesEnabled = preferences.directMessagesEnabled,
                                 spamAutoDeleteDays = preferences.spamAutoDeleteDays,
                                 onNotificationChange = { notificationSettings = it; preferences.saveNotificationSettings(it) },
                                 onThemeChange = { themePreference = it; preferences.themePreference = it },
-                                onSyncChange = { syncEnabled = it; preferences.saveSyncSettings(preferences.syncSettings().copy(enabled = it)); KheyrWorkerScheduler.scheduleAll(context, it) },
+                                onSyncChange = { enabled ->
+                                    if (enabled && preferences.authTokens().first == null) {
+                                        statusMessage = "Sign in from the Profile tab before enabling sync."
+                                    } else {
+                                        syncEnabled = enabled
+                                        preferences.saveSyncSettings(preferences.syncSettings().copy(enabled = enabled))
+                                        // Nothing is queued while sync is off, so arm the one-time
+                                        // backfill again on the way down. Without this, re-enabling
+                                        // sync leaves everything received during the off period
+                                        // permanently absent from the cloud.
+                                        if (!enabled) preferences.initialBackfillDone = false
+                                        KheyrWorkerScheduler.scheduleAll(context, enabled)
+                                    }
+                                },
                                 onDefaultSimChange = { preferences.defaultSubscriptionId = it },
                                 onDirectMessagesChange = { preferences.directMessagesEnabled = it },
                                 onSpamAutoDeleteChange = { preferences.spamAutoDeleteDays = it },
-                                onDeleteCloudData = { if (api.deleteCloudData()) statusMessage = "Cloud data deletion requested" else statusMessage = "Configure API base URL first" },
-                                onExportCloudData = { if (api.exportCloudData() != null) statusMessage = "Export requested" else statusMessage = "Configure API base URL first" },
+                                // Both used to run OkHttp straight from the click handler, i.e. on the
+                                // main thread, where every call fails with NetworkOnMainThreadException
+                                // and reported the wrong reason (B-11).
+                                onDeleteCloudData = {
+                                    if (!ApiConfig.isConfigured) {
+                                        statusMessage = "Configure API base URL first"
+                                    } else {
+                                        scope.launch(Dispatchers.IO) {
+                                            val deleted = api.deleteCloudData()
+                                            withContext(Dispatchers.Main) {
+                                                statusMessage = if (deleted) "Cloud data deletion requested" else "Cloud data deletion failed — check your connection"
+                                            }
+                                        }
+                                    }
+                                },
+                                onExportCloudData = {
+                                    if (!ApiConfig.isConfigured) {
+                                        statusMessage = "Configure API base URL first"
+                                    } else {
+                                        scope.launch(Dispatchers.IO) {
+                                            val export = api.exportCloudData()
+                                            withContext(Dispatchers.Main) {
+                                                statusMessage = if (export != null) "Export requested" else "Export failed — check your connection"
+                                            }
+                                        }
+                                    }
+                                },
                             )
                         }
                         AppScreen.DesktopSync -> DesktopSyncScreen(api = api, onStatus = { statusMessage = it })
@@ -972,12 +1177,14 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
                     modifier = Modifier.align(Alignment.TopCenter),
                 ) {
                     (selectedThread ?: lastOpenedThread)?.let { thread ->
-                        val headerSubtitle = remember(thread, messages.size, sims) {
-                            screenMapper.header(thread, messages.size, sims).subtitle
+                        val header = remember(thread, messages.size, sims) {
+                            screenMapper.header(thread, messages.size, sims)
                         }
                         ConversationTopBar(
                             thread = thread,
-                            headerSubtitle = headerSubtitle,
+                            headerSubtitle = header.subtitle,
+                            // An alphanumeric sender ("VERIFY") has nothing to dial (B-34).
+                            callEnabled = header.callEnabled,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .statusBarsPadding(),
@@ -1033,7 +1240,20 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
             val folder = chatFolder.toThreadFolder()
             ThreadActionDialog(
                 thread = thread,
+                blocked = preferences.isBlockedSender(thread.address),
                 onDismiss = { showThreadMenu = null },
+                onToggleBlock = {
+                    // The notifier already suppresses blocked senders; nothing ever wrote the set (B-19).
+                    val blocked = !preferences.isBlockedSender(thread.address)
+                    preferences.setBlockedSender(thread.address, blocked)
+                    showThreadMenu = null
+                    threadSelection = threadSelection.clear()
+                    statusMessage = if (blocked) {
+                        "Notifications from ${thread.address} are blocked"
+                    } else {
+                        "Notifications from ${thread.address} are allowed again"
+                    }
+                },
                 onAction = { action ->
                     showThreadMenu = null
                     if (action == ThreadBulkAction.Delete) {
@@ -1077,6 +1297,7 @@ fun KheyrAppShell(openThreadId: Long? = null, onThreadConsumed: () -> Unit = {})
 private fun OnboardingFlow(
     step: Int,
     gate: OnboardingGateState,
+    signedIn: Boolean,
     otpPhone: String,
     otpCode: String,
     onStepChange: (Int) -> Unit,
@@ -1084,6 +1305,7 @@ private fun OnboardingFlow(
     onOtpCodeChange: (String) -> Unit,
     onRequestDefault: () -> Unit,
     onRequestPermissions: () -> Unit,
+    onOpenSettings: () -> Unit,
     onSkipSync: () -> Unit,
     onEnableSync: () -> Unit,
     onVerifyOtp: () -> Unit,
@@ -1204,10 +1426,12 @@ private fun OnboardingFlow(
         OnboardingBottomBar(
             step = step,
             gate = gate,
+            signedIn = signedIn,
             otpCode = otpCode,
             onStepChange = onStepChange,
             onRequestDefault = onRequestDefault,
             onRequestPermissions = onRequestPermissions,
+            onOpenSettings = onOpenSettings,
             onSkipSync = onSkipSync,
             onEnableSync = onEnableSync,
             onVerifyOtp = onVerifyOtp,
@@ -1236,6 +1460,50 @@ private fun OnboardingStatusRow(complete: Boolean, completeLabel: String, pendin
     }
 }
 
+/**
+ * Recovery banner for a default-SMS role or SMS permission lost after onboarding (B-16). Dismissible,
+ * and re-shown by the resume check when the role disappears again.
+ */
+@Composable
+private fun AccessRecoveryBanner(
+    isDefaultSms: Boolean,
+    smsPermissionGranted: Boolean,
+    roleWasRemoved: Boolean,
+    onMakeDefault: () -> Unit,
+    onGrantPermission: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.errorContainer,
+    ) {
+        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                when {
+                    roleWasRemoved -> "Kheyr is no longer your default SMS app, so it can't receive or send messages."
+                    !isDefaultSms -> "Kheyr isn't your default SMS app, so it can't receive or send messages."
+                    else -> "SMS permission is missing, so conversations can't be loaded."
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (!isDefaultSms) {
+                    TextButton(onClick = onMakeDefault) { Text("Make default") }
+                }
+                if (!smsPermissionGranted) {
+                    TextButton(onClick = onGrantPermission) { Text("Grant permission") }
+                }
+                Spacer(Modifier.weight(1f))
+                TextButton(onClick = onDismiss) { Text("Dismiss") }
+            }
+        }
+    }
+}
+
 @Composable
 private fun OnboardingPermissionRow(label: String, granted: Boolean) {
     Row(
@@ -1256,10 +1524,12 @@ private fun OnboardingPermissionRow(label: String, granted: Boolean) {
 private fun OnboardingBottomBar(
     step: Int,
     gate: OnboardingGateState,
+    signedIn: Boolean,
     otpCode: String,
     onStepChange: (Int) -> Unit,
     onRequestDefault: () -> Unit,
     onRequestPermissions: () -> Unit,
+    onOpenSettings: () -> Unit,
     onSkipSync: () -> Unit,
     onEnableSync: () -> Unit,
     onVerifyOtp: () -> Unit,
@@ -1300,10 +1570,18 @@ private fun OnboardingBottomBar(
                         OutlinedButton(onClick = onRequestPermissions, modifier = Modifier.fillMaxWidth()) {
                             Text("Grant permissions")
                         }
+                        // After a permanent denial the runtime dialog never appears again, so the only
+                        // remaining route is app settings — without it onboarding dead-ends (B-15).
+                        TextButton(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
+                            Text("Open settings")
+                        }
                     }
+                    // Contacts and notifications are optional everywhere else in the app (the inbox,
+                    // Contacts tab and New message screen all degrade gracefully), so only SMS access
+                    // blocks Continue; the rows above still show what is missing.
                     Button(
                         onClick = { onStepChange(3) },
-                        enabled = gate.canUseFullSmsFeatures,
+                        enabled = gate.smsPermissionGranted,
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Text("Continue")
@@ -1318,8 +1596,17 @@ private fun OnboardingBottomBar(
                             Text("Verify OTP")
                         }
                     }
-                    Button(onClick = onEnableSync, modifier = Modifier.fillMaxWidth()) {
+                    Button(onClick = onEnableSync, enabled = signedIn, modifier = Modifier.fillMaxWidth()) {
                         Text("Enable sync")
+                    }
+                    if (!signedIn) {
+                        // Without an account SyncSettings.canUpload is false and the 15-minute worker
+                        // would run forever doing nothing, silently (B-03).
+                        Text(
+                            "Verify your phone number first — sync needs an account to upload to.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                     TextButton(onClick = onSkipSync, modifier = Modifier.fillMaxWidth()) {
                         Text("Skip for now")
@@ -1351,12 +1638,14 @@ private fun ThreadFolderScreen(
     onThreadLongPress: (SmsThread) -> Unit,
     listState: LazyListState,
     emptyText: String,
+    banner: @Composable () -> Unit = {},
 ) {
     val topInset = KheyrChromeInsets.shellTop()
     val bottomInset = KheyrChromeInsets.bottomNav()
 
     Column(Modifier.fillMaxSize()) {
         Spacer(Modifier.height(topInset))
+        banner()
         KheyrSearchField(
             value = searchQuery,
             onValueChange = onSearchChange,
@@ -1459,9 +1748,9 @@ private fun ConversationScreenContent(
                 value = searchQuery,
                 onValueChange = onSearchQueryChange,
                 placeholder = "Search in conversation",
-                modifier = Modifier
-                    .padding(top = topInset, start = 8.dp, end = 8.dp, bottom = 8.dp)
-                    .focusRequester(searchFocusRequester),
+                modifier = Modifier.padding(top = topInset, start = 8.dp, end = 8.dp, bottom = 8.dp),
+                // KheyrSearchField attaches the requester to the inner text field itself; adding a
+                // second .focusRequester for the same instance here would register it twice.
                 focusRequester = searchFocusRequester,
             )
         }
@@ -1506,6 +1795,7 @@ private fun ConversationScreenContent(
 private fun ConversationTopBar(
     thread: SmsThread,
     headerSubtitle: String?,
+    callEnabled: Boolean,
     onNavigateBack: () -> Unit,
     onSearchToggle: () -> Unit,
     onCall: () -> Unit,
@@ -1531,7 +1821,9 @@ private fun ConversationTopBar(
             },
             actions = {
                 IconButton(onClick = onSearchToggle) { Icon(Icons.Default.Search, "Search") }
-                IconButton(onClick = onCall) { Icon(Icons.Default.Call, "Call") }
+                if (callEnabled) {
+                    IconButton(onClick = onCall) { Icon(Icons.Default.Call, "Call") }
+                }
             },
             colors = TopAppBarDefaults.topAppBarColors(
                 containerColor = androidx.compose.ui.graphics.Color.Transparent,
@@ -1592,6 +1884,7 @@ private fun SettingsDetailScreen(
     notificationSettings: NotificationSettings,
     themePreference: ThemePreference,
     syncEnabled: Boolean,
+    signedIn: Boolean,
     defaultSub: Int?,
     sims: List<SimCard>,
     directMessagesEnabled: Boolean,
@@ -1638,7 +1931,17 @@ private fun SettingsDetailScreen(
                 }
             }
             SettingsCategory.Sync -> {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("Enable sync"); Switch(checked = syncEnabled, onCheckedChange = onSyncChange) }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("Enable sync")
+                    Switch(checked = syncEnabled && signedIn, enabled = signedIn, onCheckedChange = onSyncChange)
+                }
+                if (!signedIn) {
+                    Text(
+                        "Sync is unavailable until you sign in: without an account there is nowhere to upload to.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
                 Text("API: ${ApiConfig.baseUrl}", style = MaterialTheme.typography.labelSmall)
             }
             SettingsCategory.DesktopDevices -> Text("Manage paired desktop devices from the Chats overflow menu.")
@@ -1762,12 +2065,22 @@ private fun HelpScreen() {
 
 private const val PRIVACY_POLICY_URL = "https://kheyr.app/privacy"
 
-/** Clears all signed-in state locally (tokens, phone, sync device) and routes back to onboarding. */
-private fun clearLocalSession(preferences: AppPreferences) {
+/**
+ * Clears the signed-in sync state locally (tokens, phone, sync device, backfill flag).
+ *
+ * `onboardingComplete` deliberately stays true: the sync account is optional and signing out of it
+ * changes neither the default-SMS role nor any permission, so replaying onboarding would be a
+ * pointless dead end (B-20). Clearing initialBackfillDone makes a later sign-in backfill again.
+ */
+private fun clearLocalSession(context: android.content.Context, preferences: AppPreferences) {
     preferences.clearAuthTokens()
     preferences.userPhone = null
     preferences.saveSyncSettings(preferences.syncSettings().copy(enabled = false, deviceId = null))
-    preferences.onboardingComplete = false
+    preferences.initialBackfillDone = false
+    preferences.saveSyncCursor(null)
+    // The queue holds plaintext bodies queued by the account that is signing out. Leaving them would
+    // upload one person's messages under whoever signs in next on this device.
+    runCatching { AppDatabase.getInstance(context).syncQueueDao().deleteAll() }
 }
 
 /** Launches an intent, ignoring the case where no app can handle it (avoids ActivityNotFoundException crashes). */
@@ -1924,7 +2237,14 @@ private fun ContactsScreen(
 }
 
 @Composable
-private fun ThreadActionDialog(thread: SmsThread, onDismiss: () -> Unit, onAction: (ThreadBulkAction) -> Unit, onPin: () -> Unit) {
+private fun ThreadActionDialog(
+    thread: SmsThread,
+    blocked: Boolean,
+    onDismiss: () -> Unit,
+    onToggleBlock: () -> Unit,
+    onAction: (ThreadBulkAction) -> Unit,
+    onPin: () -> Unit,
+) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(thread.displayName.ifBlank { thread.address }) },
@@ -1957,6 +2277,11 @@ private fun ThreadActionDialog(thread: SmsThread, onDismiss: () -> Unit, onActio
                     icon = Icons.Default.Notifications,
                     label = if (thread.isMuted) "Unmute" else "Mute",
                     onClick = { onAction(ThreadBulkAction.Mute) },
+                )
+                ThreadActionMenuItem(
+                    icon = Icons.Default.Lock,
+                    label = if (blocked) "Unblock sender" else "Block sender",
+                    onClick = onToggleBlock,
                 )
                 ThreadActionMenuItem(
                     icon = Icons.Default.Delete,

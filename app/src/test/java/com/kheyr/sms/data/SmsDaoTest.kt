@@ -150,6 +150,18 @@ class SmsDaoTest {
         assertEquals("url,winner", dao.syncSpamMetadata(1)?.spamReason)
     }
 
+    @Test fun spamRetentionQueriesSelectOnlySpamMessagesOlderThanTheCutoff() {
+        dao.insertIncomingSms(message(threadId = 1, body = "old spam", at = "2026-01-01T00:00:00Z"))
+        dao.insertIncomingSms(message(threadId = 1, body = "new spam", at = "2026-03-01T00:00:00Z"))
+        dao.insertIncomingSms(message(threadId = 2, body = "old ham", at = "2026-01-01T00:00:00Z"))
+        dao.autoMarkSpam(1)
+
+        val ids = dao.spamMessageIdsOlderThan(Instant.parse("2026-02-01T00:00:00Z"))
+
+        assertEquals(listOf("old spam"), dao.messagesByIds(ids).map { it.body })
+        assertEquals(listOf("old spam", "old ham", "new spam"), dao.allMessages().map { it.body })
+    }
+
     private fun message(
         threadId: Long,
         body: String = "message $threadId",

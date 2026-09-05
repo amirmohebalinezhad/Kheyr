@@ -10,7 +10,7 @@ import org.junit.Test
 class SmsReceiveHandlerTest {
     @Test fun spamMessageIsPersistedAsSpamWithoutNotification() {
         val harness = Harness()
-        val result = harness.handle(IncomingSms("+989991234", "winner visit https://bad.example", 10L, 1, 7))
+        val result = harness.handle(IncomingSms("+989991234", "winner visit https://bad.example", 10L, 5L, 1, 7))
 
         assertEquals(IncomingSmsResult.SpamSuppressed, result)
         assertEquals(1, harness.spamMessages.size)
@@ -20,7 +20,7 @@ class SmsReceiveHandlerTest {
 
     @Test fun nonSpamMessageIsPersistedAndNotified() {
         val harness = Harness(knownContacts = setOf("+15551234567"))
-        val result = harness.handle(IncomingSms("+15551234567", "Dinner at 7?", 20L, 0, 3))
+        val result = harness.handle(IncomingSms("+15551234567", "Dinner at 7?", 20L, 15L, 0, 3))
 
         assertEquals(IncomingSmsResult.NotificationPosted, result)
         assertEquals(0, harness.spamMessages.size)
@@ -30,7 +30,7 @@ class SmsReceiveHandlerTest {
 
     @Test fun otpNegativeScorePreventsUnknownSenderSpamSuppression() {
         val harness = Harness()
-        val result = harness.handle(IncomingSms("12345", "Your code is 123456", 30L, null, null))
+        val result = harness.handle(IncomingSms("12345", "Your code is 123456", 30L, null, null, null))
 
         assertEquals(IncomingSmsResult.NotificationPosted, result)
         assertEquals(0, harness.spamMessages.size)
@@ -40,7 +40,7 @@ class SmsReceiveHandlerTest {
 
     @Test fun unknownSenderNotificationRunsOnlyAfterSpamCheck() {
         val harness = Harness()
-        val result = harness.handle(IncomingSms("+15557654321", "hello from a new number", 40L, 1, 9))
+        val result = harness.handle(IncomingSms("+15557654321", "hello from a new number", 40L, 35L, 1, 9))
 
         assertEquals(IncomingSmsResult.NotificationPosted, result)
         assertEquals(0, harness.spamMessages.size)
@@ -48,7 +48,23 @@ class SmsReceiveHandlerTest {
         assertTrue(harness.lastNotificationWasUnknownSender)
     }
 
-    private class Harness(knownContacts: Set<String> = emptySet()) {
+    @Test fun spamScoringMessageOnAThreadTheUserRestoredStillNotifies() {
+        // B-23 regression: autoMarkSpam refuses to re-hide a corrected thread, but the handler used
+        // to return SpamSuppressed regardless, so every later message from that sender arrived
+        // silently - the message sat in the inbox with no notification, forever.
+        val harness = Harness(treatSpamAsSpam = false)
+
+        val result = harness.handle(IncomingSms("+989991234", "winner visit https://bad.example", 10L, 9L, 1, 7))
+
+        assertEquals(IncomingSmsResult.NotificationPosted, result)
+        assertEquals(1, harness.notifications)
+    }
+
+    private class Harness(
+        knownContacts: Set<String> = emptySet(),
+        // false models a thread the user has restored with "Not spam": the store refuses to flag it.
+        private val treatSpamAsSpam: Boolean = true,
+    ) {
         val spamMessages = mutableListOf<IncomingSms>()
         val inboxMessages = mutableListOf<IncomingSms>()
         var notifications = 0
@@ -56,10 +72,13 @@ class SmsReceiveHandlerTest {
         private val handler = SmsReceiveHandler(
             spamRules = SpamRulesProvider { rules },
             contactLookup = SenderContactLookup { it in knownContacts },
-            spamStore = SpamMessageStore { message, _, _ -> spamMessages += message },
+            spamStore = SpamMessageStore { message, _, _ ->
+                spamMessages += message
+                SpamPersistOutcome(stored(message), treatedAsSpam = treatSpamAsSpam)
+            },
             inboxStore = InboxMessageStore { message ->
                 inboxMessages += message
-                StoredIncomingSms(1L, message.sender, message.body, message.receivedAtMillis, message.simSlot, message.subscriptionId)
+                stored(message)
             },
             notifier = IncomingSmsNotifier { _, senderIsContact ->
                 notifications += 1
@@ -70,6 +89,16 @@ class SmsReceiveHandlerTest {
         fun handle(message: IncomingSms) = handler.handle(message)
 
         private companion object {
+            fun stored(message: IncomingSms) = StoredIncomingSms(
+                1L,
+                message.sender,
+                message.body,
+                message.receivedAtMillis,
+                message.sentAtMillis,
+                message.simSlot,
+                message.subscriptionId,
+            )
+
             val rules = SpamRuleSet(1, threshold = 70, rules = listOf(
                 SpamRule("premium-prefix", SpamRuleType.NumberPrefix, "+98999", 35),
                 SpamRule("winner", SpamRuleType.MessageKeyword, "winner", 30),

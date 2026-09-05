@@ -38,15 +38,19 @@ matching `.github/workflows/android-apk.yml`:
   receive pipeline, Room DAO queries, sync, thread sorting, etc.). Build the APK to confirm it
   compiles/packages.
 
-### Known pre-existing failures (NOT environment issues)
+### Build and test status
 
-These fail on a clean checkout regardless of setup — do not treat them as broken environment, and
-do not "fix" them unless that is the actual task:
+As of the current commit the build is green: `:app:assembleDebug` compiles and packages, and
+`:app:testDebugUnitTest` passes all 176 unit tests. There are no known pre-existing test
+failures — if a test fails for you, treat it as a real regression, not as environment noise.
 
-- `:app:testDebugUnitTest` — `SmsDaoTest.insertGroupsMessagesByThreadWithLatestPreviewAndUnreadCount`
-  fails (`expected:<1> but was:<0>`): the `inboxThreads()` query computes `unreadCount` with a
-  `SUM(...)` over a join that only keeps the single newest message, so older unread messages are
-  never counted. The other 51 unit tests pass.
-- `:app:lintDebug` — fails the build with 1 error: `MissingPermission` at
-  `app/src/main/java/com/kheyr/sms/receiver/SmsReceiver.kt:135` (plus 13 warnings). Lint itself
-  runs fine; the error is in app code.
+The two failures previously listed here are gone: `inboxThreads()` now computes `unreadCount`
+with a correlated `COUNT(*)` sub-select (so `SmsDaoTest` passes), and the `SmsReceiver.kt:135`
+lint error no longer exists (that file is now 24 lines long).
+
+- **Known issues:** see `docs/android-app-bugs.md` for the current list of open bugs.
+- **Lint:** `:app:lintDebug` passes with 0 errors (23 warnings remain). CI enforces it, so a new lint
+  error fails the build. The one error that used to fail it was
+  `UnusedMaterial3ScaffoldPaddingParameter`: the app shell is edge-to-edge and insets its own chrome,
+  so the Scaffold's content padding is ignored on purpose and that check is suppressed at
+  `KheyrAppShell` with a comment explaining why.

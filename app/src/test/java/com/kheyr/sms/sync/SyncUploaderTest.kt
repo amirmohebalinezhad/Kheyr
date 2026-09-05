@@ -28,7 +28,7 @@ class SyncUploaderTest {
         val api = CapturingApiClient()
         val logger = CapturingLogger()
 
-        val uploaded = SyncUploader(
+        val outcome = SyncUploader(
             settingsProvider = { SyncSettings(enabled = true, deviceId = "device-1") },
             queueStore = store,
             apiClient = api,
@@ -36,7 +36,8 @@ class SyncUploaderTest {
             logger = logger,
         ).uploadPending()
 
-        assertEquals(1, uploaded)
+        assertEquals(1, outcome.uploaded)
+        assertFalse(outcome.rejected)
         val payloadString = api.uploaded.single().toString()
         assertFalse(payloadString.contains(plaintext))
         assertTrue(api.uploaded.single().event is EncryptedSmsMessageDto)
@@ -62,17 +63,47 @@ class SyncUploaderTest {
         )
         val api = CapturingApiClient()
 
-        val uploaded = SyncUploader(
+        val outcome = SyncUploader(
             settingsProvider = { SyncSettings(enabled = true, deviceId = "device-1") },
             queueStore = store,
             apiClient = api,
             encryptor = SmsBodyEncryptor(key),
         ).uploadPending()
 
-        assertEquals(1, uploaded)
+        assertEquals(1, outcome.uploaded)
         assertEquals(2L, api.uploaded.single().queueId)
         assertFalse(api.uploaded.toString().contains("old deleted body"))
         assertEquals(listOf(2L, 1L), store.uploadedQueueIds)
+    }
+
+    @Test fun failedUploadLeavesQueueRowsPendingForTheNextRun() {
+        val store = InMemoryQueueStore(
+            listOf(
+                MessageChangeSyncRecord(queueId = 1, createdAt = Instant.EPOCH, message = sms(body = "hello")),
+                InitialBackfillSyncRecord(
+                    queueId = 2,
+                    createdAt = Instant.EPOCH,
+                    message = sms(id = 10, body = "deleted before sync"),
+                    locallyDeletedBeforeSync = true,
+                ),
+            ),
+        )
+        val api = CapturingApiClient(succeeds = false)
+
+        val outcome = SyncUploader(
+            settingsProvider = { SyncSettings(enabled = true, deviceId = "device-1") },
+            queueStore = store,
+            apiClient = api,
+            encryptor = SmsBodyEncryptor(key),
+        ).uploadPending()
+
+        // An offline window or a 5xx must not consume the queue: nothing is deleted or marked, so the
+        // next run retries the same rows (B-06).
+        assertEquals(0, outcome.uploaded)
+        assertEquals(emptyList<Long>(), store.uploadedQueueIds)
+        // A refused upload must be distinguishable from an empty queue, or SyncWorker reports success
+        // and WorkManager applies no backoff (B-48).
+        assertTrue(outcome.rejected)
     }
 
     @Test fun syncIsOffByDefault() {
@@ -89,10 +120,11 @@ class SyncUploaderTest {
         status = MessageStatus.Received,
     )
 
-    private class CapturingApiClient : SyncApiClient {
+    private class CapturingApiClient(private val succeeds: Boolean = true) : SyncApiClient {
         val uploaded = mutableListOf<SyncUploadDto>()
-        override fun upload(payloads: List<SyncUploadDto>) {
+        override fun upload(payloads: List<SyncUploadDto>): Boolean {
             uploaded += payloads
+            return succeeds
         }
     }
 

@@ -44,16 +44,19 @@ interface SmsDao {
         return insertMessage(message)
     }
 
+    /**
+     * Inserts a batch and reports the row id each message actually received, in the order given.
+     *
+     * The ids matter to the caller: an entity handed in with `id = 0` gets a fresh AUTOINCREMENT id,
+     * so anything keyed by message id afterwards - the sync payload above all - has to use the new
+     * id rather than whatever the in-memory copy was carrying. `insertMessage` ignores conflicts and
+     * reports -1 when it did not insert, and that value is passed through unchanged.
+     */
     @Transaction
-    fun insertSmsBatch(messages: List<SmsMessageEntity>) {
-        messages.forEach { insertSms(it) }
-    }
+    fun insertSmsBatch(messages: List<SmsMessageEntity>): List<Long> = messages.map { insertSms(it) }
 
     @Query("SELECT COALESCE(MAX(telephonyId), 0) FROM messages WHERE telephonyId IS NOT NULL")
     fun latestSyncedTelephonyId(): Long
-
-    @Query("SELECT telephonyId FROM messages WHERE telephonyId >= :start AND telephonyId <= :end")
-    fun syncedTelephonyIdsInRange(start: Long, end: Long): List<Long>
 
     @Query("""
         SELECT t.id, t.address, t.displayName, m.body AS lastMessage, m.timestamp AS lastMessageAt,
@@ -69,9 +72,6 @@ interface SmsDao {
     """)
     fun inboxThreads(): List<ThreadWithLatestMessage>
 
-    @Query("SELECT telephonyId FROM messages WHERE telephonyId >= :start AND telephonyId <= :end")
-    fun syncedTelephonyIdsInRange(start: Long, end: Long): List<Long>
-
     @Query("""
         SELECT t.id, t.address, t.displayName, m.body AS lastMessage, m.timestamp AS lastMessageAt,
             (SELECT COUNT(*) FROM messages unread
@@ -85,9 +85,6 @@ interface SmsDao {
         ORDER BY m.timestamp DESC
     """)
     fun spamThreads(): List<ThreadWithLatestMessage>
-
-    @Query("SELECT telephonyId FROM messages WHERE telephonyId >= :start AND telephonyId <= :end")
-    fun syncedTelephonyIdsInRange(start: Long, end: Long): List<Long>
 
     @Query("""
         SELECT t.id, t.address, t.displayName, m.body AS lastMessage, m.timestamp AS lastMessageAt,
@@ -105,6 +102,13 @@ interface SmsDao {
 
     @Query("SELECT * FROM messages WHERE threadId = :threadId ORDER BY timestamp ASC, id ASC")
     fun messagesForThread(threadId: Long): List<SmsMessageEntity>
+
+    @Query("SELECT * FROM messages ORDER BY timestamp ASC, id ASC")
+    fun allMessages(): List<SmsMessageEntity>
+
+    // timestamp is stored as epoch millis by Converters, so the Instant parameter binds directly.
+    @Query("SELECT m.id FROM messages m JOIN thread_state s ON s.threadId = m.threadId WHERE s.isSpam = 1 AND m.timestamp < :cutoff")
+    fun spamMessageIdsOlderThan(cutoff: Instant): List<Long>
 
     @Query("SELECT * FROM messages WHERE body LIKE '%' || :query || '%' OR address LIKE '%' || :query || '%' ORDER BY timestamp DESC, id DESC")
     fun searchMessages(query: String): List<SmsMessageEntity>
@@ -150,8 +154,33 @@ interface SmsDao {
         updateSpamState(threadId, isSpam)
     }
 
-    @Query("UPDATE thread_state SET isSpam = :isSpam WHERE threadId = :threadId")
+    // The UI path records the user's intent as well as the flag: marking a thread "Not spam" pins that
+    // decision so [autoMarkSpam] can no longer re-flag it, and marking it spam again clears the override.
+    @Query("UPDATE thread_state SET isSpam = :isSpam, userNotSpam = NOT :isSpam WHERE threadId = :threadId")
     fun updateSpamState(threadId: Long, isSpam: Boolean)
+
+    @Query("SELECT COALESCE(userNotSpam, 0) FROM thread_state WHERE threadId = :threadId")
+    fun isUserNotSpam(threadId: Long): Boolean?
+
+    /**
+     * Automatic (classifier-driven) spam flagging. Unlike [updateSpam] this respects an earlier
+     * "Not spam" correction and never touches [ThreadStateEntity.userNotSpam] itself.
+     */
+    @Transaction
+    /**
+     * Returns false when the user has restored this thread with "Not spam", meaning the classifier
+     * does not get to touch it; the caller must then treat the message as a normal inbox message
+     * rather than silently suppressing it.
+     */
+    fun autoMarkSpam(threadId: Long): Boolean {
+        ensureThreadState(threadId)
+        if (isUserNotSpam(threadId) == true) return false
+        markSpamAutomatically(threadId)
+        return true
+    }
+
+    @Query("UPDATE thread_state SET isSpam = 1 WHERE threadId = :threadId")
+    fun markSpamAutomatically(threadId: Long)
 
     @Transaction
     fun updateMuted(threadId: Long, isMuted: Boolean) {
@@ -232,7 +261,9 @@ interface SmsDao {
                 read = message.read,
                 simSlot = message.simSlot,
             )
-            upsertThread(SmsThreadEntity(message.threadId, message.address, message.address, message.timestamp))
+            // Re-syncing an existing message must not reset the thread row: upsertThreadInitial keeps a
+            // display name the user/contacts already gave the thread and the earliest createdAt (B-30).
+            upsertThreadInitial(message.threadId, message.address, message.address, message.timestamp)
         }
     }
 

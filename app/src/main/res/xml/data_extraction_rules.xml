@@ -1,1 +1,38 @@
-<data-extraction-rules />
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Backup / transfer rules for API 31+ (android:dataExtractionRules).
+
+  Same reasoning as backup_rules.xml, and the same two categories: the SQLCipher database and the
+  Keystore-wrapped preference files are undecryptable off-device, and the row-id-keyed files are
+  invalidated by the restore that reassigns those ids. Both are excluded from cloud backup and from
+  direct device-to-device transfer - the Keystore does not travel in either case.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="database" path="kheyr_sms.db" />
+        <exclude domain="database" path="kheyr_sms.db-shm" />
+        <exclude domain="database" path="kheyr_sms.db-wal" />
+        <exclude domain="database" path="kheyr_sms.db-journal" />
+
+        <exclude domain="sharedpref" path="kheyr_secure_db.xml" />
+        <exclude domain="sharedpref" path="kheyr_sync_key_store.xml" />
+        <exclude domain="sharedpref" path="kheyr_prefs.xml" />
+
+        <!-- Row-id-keyed state; see backup_rules.xml for why this must go with the database. -->
+        <exclude domain="sharedpref" path="kheyr_deleted_telephony_ids.xml" />
+        <exclude domain="sharedpref" path="sms_send_status_parts.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="database" path="kheyr_sms.db" />
+        <exclude domain="database" path="kheyr_sms.db-shm" />
+        <exclude domain="database" path="kheyr_sms.db-wal" />
+        <exclude domain="database" path="kheyr_sms.db-journal" />
+
+        <exclude domain="sharedpref" path="kheyr_secure_db.xml" />
+        <exclude domain="sharedpref" path="kheyr_sync_key_store.xml" />
+        <exclude domain="sharedpref" path="kheyr_prefs.xml" />
+
+        <exclude domain="sharedpref" path="kheyr_deleted_telephony_ids.xml" />
+        <exclude domain="sharedpref" path="sms_send_status_parts.xml" />
+    </device-transfer>
+</data-extraction-rules>

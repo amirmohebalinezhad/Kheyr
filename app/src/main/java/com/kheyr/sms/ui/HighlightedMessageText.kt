@@ -23,6 +23,15 @@ fun HighlightedMessageText(
     val highlightRanges = highlightRanges(text, highlight)
     val textDirection = MessageTextDirection.resolve(text)
     val textStyle = MaterialTheme.typography.bodyLarge.copy(textDirection = textDirection)
+    // buildAnnotatedString's builder lambda is not composable, so the theme colors have to be
+    // read here, in composition, and captured.
+    val linkStyles = TextLinkStyles(
+        style = SpanStyle(
+            color = MaterialTheme.colorScheme.primary,
+            textDecoration = TextDecoration.Underline,
+        ),
+    )
+    val highlightStyle = SpanStyle(background = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
 
     if (links.isEmpty() && highlightRanges.isEmpty()) {
         Text(text, modifier = modifier, style = textStyle)
@@ -33,20 +42,10 @@ fun HighlightedMessageText(
         segments(text, links, highlightRanges).forEach { segment ->
             val content = text.substring(segment.start, segment.end)
             if (segment.linkUrl != null) {
-                pushLink(
-                    LinkAnnotation.Url(
-                        url = segment.linkUrl,
-                        styles = TextLinkStyles(
-                            style = SpanStyle(
-                                color = MaterialTheme.colorScheme.primary,
-                                textDecoration = TextDecoration.Underline,
-                            ),
-                        ),
-                    ),
-                )
+                pushLink(LinkAnnotation.Url(url = segment.linkUrl, styles = linkStyles))
             }
             if (segment.highlighted) {
-                withStyle(SpanStyle(background = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))) {
+                withStyle(highlightStyle) {
                     append(content)
                 }
             } else {
@@ -82,17 +81,20 @@ private fun segments(text: String, links: List<MessageLink>, highlightRanges: Li
     }
 }
 
-private fun highlightRanges(text: String, highlight: String?): List<IntRange> {
+// Searching the original string case-insensitively keeps every index anchored to `text`.
+// Searching `text.lowercase()` used to drift whenever a character's lowercase form has a
+// different length (the Turkish dotted capital I lowercases to two code units), which made
+// segments() substring past the end of `text`.
+internal fun highlightRanges(text: String, highlight: String?): List<IntRange> {
     if (highlight.isNullOrBlank()) return emptyList()
-    val lowerText = text.lowercase()
-    val lowerHighlight = highlight.lowercase()
     val ranges = mutableListOf<IntRange>()
     var start = 0
-    while (start < text.length) {
-        val index = lowerText.indexOf(lowerHighlight, start)
+    while (start <= text.length - highlight.length) {
+        val index = text.indexOf(highlight, start, ignoreCase = true)
         if (index < 0) break
         ranges += index until index + highlight.length
-        start = index + highlight.length
+        // A blank needle is already excluded above; coerce anyway so the loop can never stall.
+        start = index + highlight.length.coerceAtLeast(1)
     }
     return ranges
 }

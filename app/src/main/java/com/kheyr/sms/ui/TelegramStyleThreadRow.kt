@@ -115,11 +115,35 @@ fun TelegramStyleThreadRow(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
+                // Trailing pills keep their intrinsic width; the preview carries weight(1f)
+                // so a long preview ellipsizes instead of pushing them out of the row.
+                simBadge?.let { badge ->
+                    SimBadgePill(label = badge, modifier = Modifier.padding(start = 6.dp))
+                }
                 unreadBadge?.let { badge ->
-                    UnreadCountPill(count = badge)
+                    UnreadCountPill(count = badge, modifier = Modifier.padding(start = 6.dp))
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun SimBadgePill(label: String, modifier: Modifier = Modifier) {
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(4.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant,
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            style = MaterialTheme.typography.labelSmall,
+            fontSize = 10.sp,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
