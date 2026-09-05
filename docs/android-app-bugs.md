@@ -9,10 +9,15 @@ Severity scale: **Critical** = nothing ships / crash loop, **High** = feature do
 
 **Status.** All of these have since been fixed on this branch except B-24, which is deliberately deferred
 (applying downloaded sync changes needs decryption, merge semantics and a live backend to validate against).
-Three further bugs found while fixing the rest are recorded below as B-38 to B-40. Each entry keeps its
-original description so the reasoning behind the fix stays readable; the **Status** column above says what
-was actually done. Fixing the list took the unit suite from a source set that did not compile to **218
-passing tests**, and `:app:assembleDebug` produces an APK again.
+Three further bugs found while fixing the rest are recorded below as B-38 to B-40, and four more that the
+fixes themselves introduced — caught by an adversarial review of the branch diff — as B-41 to B-44. B-41
+is worth reading even if nothing else here is: the fix for a data-loss bug created a worse one, in which
+a message the user sent went out over the air and never appeared in the conversation.
+
+Each entry keeps its original description so the reasoning behind the fix stays readable; the **Status**
+column above says what was actually done. Fixing the list took the unit suite from a source set that did
+not compile to **219 passing tests**, `:app:lintDebug` to zero errors, and `:app:assembleDebug` back to
+producing an APK.
 
 ## Summary
 
@@ -691,6 +696,83 @@ unreachable.
 **Fixed:** a second long-press on the single selected row opens its menu, which now also carries
 Block/Unblock. Worth a second opinion on the exact entry point - the alternative is to move Block
 into the existing multi-select overflow and delete the dialog.
+
+---
+
+## Found while reviewing the fixes
+
+Bugs the fixes above introduced, caught by an adversarial review of the branch diff and fixed on it.
+They are recorded because they explain why some of the code is shaped the way it is, and because the
+first one is a reminder that a fix for a data-loss bug can create a worse one.
+
+<a id="b-41"></a>
+### B-41. A tombstone could swallow a newly sent message (Critical)
+
+`app/src/main/java/com/kheyr/sms/data/SmsRepository.kt`
+
+The B-13 tombstone filter was placed inside the shared `syncTelephonyMessages(...)`, which also serves
+`syncTelephonyMessagesByIds(...)` — and that is exactly how a message the user just sent enters Room:
+`persistOutgoing()` writes it to the provider and hands back its `_id`, and the caller imports that one
+row. The SMS provider does not use `AUTOINCREMENT`, so SQLite reuses the rowid of a deleted message.
+Delete the newest thread, send a new message, and it can be assigned an id that is still tombstoned:
+the message goes out over the air and never appears in the conversation.
+
+**Fixed:** only the discovery paths (the "newer than" scan and the gap-window backfill) consult
+tombstones. An explicit id list is the caller asserting those rows are live, so it bypasses the filter
+and clears any stale tombstone on those ids.
+
+<a id="b-42"></a>
+### B-42. A thread restored with "Not spam" was silenced forever (High)
+
+`app/src/main/java/com/kheyr/sms/receiver/SmsReceiveHandler.kt`
+
+B-23 gave `autoMarkSpam` the good half of the behaviour — it refuses to re-hide a thread the user
+corrected — but `SmsReceiveHandler` still branched on the score alone and returned `SpamSuppressed`.
+Every later spam-scoring message from that sender therefore landed in the inbox with no notification.
+The correction left the user worse off than before: the thread was visible but silent.
+
+**Fixed:** `persistSpam` reports whether the thread really is spam, and the handler notifies when the
+user's correction stands. Covered by a regression test.
+
+<a id="b-43"></a>
+### B-43. The undo window reopened the B-13 hole (High)
+
+`app/src/main/java/com/kheyr/sms/data/SmsRepository.kt`, `.../ui/KheyrAppShell.kt`
+
+Splitting the delete for B-14 left the snackbar window in exactly the state B-13 describes: rows gone
+from Room, still present in the provider, and no tombstone in between. A refresh during those seconds —
+or simply the next launch, if the process died before the deferred commit ran — re-imported the thread
+the user had just deleted. Undo also left other devices believing the thread was gone, because the
+queued sync delete events uploaded and the restored rows were never re-queued.
+
+**Fixed:** tombstone at delete time, lift the tombstones on Undo, and re-queue the restored messages.
+
+<a id="b-44"></a>
+### B-44. Smaller defects in the same review (Low)
+
+- **Notification not dismissed (B-33's other half).** Suppressing notifications for the conversation on
+  screen does nothing about one posted a moment earlier, and since nothing will replace a suppressed
+  notification, the stale one simply stayed there. Opening a conversation now cancels it.
+- **CDMA delivery reports read with GSM ranges.** `SmsMessage.getStatus()` shifts a 3GPP2 status into
+  bits 16-23; read as a GSM TP-Status it looks like a permanent failure, marking the message Failed and
+  offering a Retry that would send it twice. Anything outside the single-byte GSM range is now treated
+  as "no usable verdict".
+- **Duplicate spam sync events.** `autoMarkSpam` enqueued an identical event for every message on an
+  already-flagged thread. It now enqueues only on the transition.
+- **Tombstone write race.** The read-modify-write is reached from the UI coroutine, the bulk-delete loop
+  and the notification-action thread at once, so concurrent deletes dropped each other's ids. Serialised.
+- **Database recovery stranded its own DAOs.** Swapping the `AppDatabase` singleton would leave a DAO
+  already captured by `SmsRepository` bound to a closed database, crashing the launch the recovery
+  exists to heal. It reopens underneath the same instance instead.
+
+### Still open from that review (Low)
+
+- **Synced messages always report `isSpam = false`.** `SmsMessageEntity` has no spam column — it is
+  thread state — and the private `toModel()` takes the model default. Fixing it means a thread-state
+  lookup per enqueued message. Left alone because nothing consumes the field yet (B-24 is not done).
+- **Initial backfill queues messages only.** Existing pin/archive/spam/mute state is never uploaded, so
+  a user who enables sync after months of curation backfills the messages but none of the organisation.
+  It only corrects itself when the user next toggles each thread.
 
 ---
 

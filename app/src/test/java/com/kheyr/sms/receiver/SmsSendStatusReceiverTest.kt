@@ -33,4 +33,11 @@ class SmsSendStatusReceiverTest {
     @Test fun missingOrUnparseableReportFallsBackToTheResultCode() {
         assertEquals(DeliveryOutcome.Delivered, SmsSendStatusDecider.deliveryOutcome(null))
     }
+
+    @Test fun cdmaReportIsNotReadWithGsmRanges() {
+        // 3GPP2 status arrives shifted into bits 16-23. Read as a GSM TP-Status it looks like a
+        // permanent failure, which would mark a message Failed and offer a Retry that sends it twice.
+        assertEquals(DeliveryOutcome.Pending, SmsSendStatusDecider.deliveryOutcome(0x020000))
+        assertEquals(DeliveryOutcome.Pending, SmsSendStatusDecider.deliveryOutcome(0x000100))
+    }
 }

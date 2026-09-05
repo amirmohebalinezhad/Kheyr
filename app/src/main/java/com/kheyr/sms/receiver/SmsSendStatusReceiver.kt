@@ -123,6 +123,12 @@ internal object SmsSendStatusDecider {
      */
     fun deliveryOutcome(reportStatus: Int?): DeliveryOutcome = when {
         reportStatus == null -> DeliveryOutcome.Delivered
+        // CDMA (3GPP2) reports come through the same accessor but, as SmsMessage.getStatus()
+        // documents, shifted into bits 16-23 so they cannot be confused with a GSM TP-Status. Reading
+        // one with the GSM ranges below would call a "still trying" report a permanent failure and
+        // offer a Retry, which resends a message the network is already delivering. Treat anything
+        // outside the single-byte GSM range as "no usable verdict" rather than guessing.
+        reportStatus and 0xFF.inv() != 0 -> DeliveryOutcome.Pending
         reportStatus < 0x20 -> DeliveryOutcome.Delivered
         reportStatus < 0x40 -> DeliveryOutcome.Pending
         else -> DeliveryOutcome.Failed
