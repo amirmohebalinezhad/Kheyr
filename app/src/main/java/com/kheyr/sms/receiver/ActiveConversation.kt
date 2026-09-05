@@ -17,3 +17,8 @@ object ActiveConversation {
 
     fun isOpen(threadId: Long): Boolean = openThreadId == threadId
 }
+
+/** Shared derivation of a thread's notification id, so the UI can dismiss what the receiver posted. */
+object IncomingSmsNotifications {
+    fun notificationId(threadId: Long): Int = (threadId xor (threadId ushr 32)).toInt()
+}

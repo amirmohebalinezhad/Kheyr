@@ -387,6 +387,11 @@ class SmsRepository(
         if (ids.isEmpty()) return@withContext
         val deleted = smsDao.messagesByIds(ids)
         smsDao.deleteMessagesByIds(ids)
+        // Tombstone immediately, even though the provider rows survive until the undo window closes.
+        // Without this the window is precisely the B-13 condition - gone from Room, still in the
+        // provider - so a refresh during the snackbar, or simply the next launch if the process dies
+        // before commit, re-imports the thread the user just deleted.
+        recordDeletedTelephonyIds(deleted.mapNotNull { it.telephonyId })
         enqueueDeletes(deleted)
     }
 
@@ -493,9 +498,19 @@ class SmsRepository(
         smsDao.messagesForThread(threadId)
     }
 
+    /**
+     * Undo of a delete still inside its snackbar window: puts the snapshot back, lifts the
+     * tombstones so the provider rows are importable again, and - when sync is on - re-queues the
+     * messages so the delete events already sitting in sync_queue do not leave other devices
+     * believing the thread is gone.
+     */
     suspend fun restoreThreadMessages(messages: List<SmsMessageEntity>) = withContext(Dispatchers.IO) {
         if (messages.isEmpty()) return@withContext
         smsDao.insertSmsBatch(messages.map { it.copy(id = 0) })
+        forgetDeletedTelephonyIds(messages.mapNotNull { it.telephonyId })
+        enqueueForSync { store ->
+            messages.forEach { store.enqueueMessage(it.toModel()) }
+        }
     }
 
     suspend fun loadLocalMessages(threadId: Long): List<SmsMessage> = withContext(Dispatchers.IO) {

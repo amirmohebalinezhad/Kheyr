@@ -271,7 +271,7 @@ class PolicyAwareIncomingSmsNotifier(
         context.contentResolver.openInputStream(photoUri)?.use(BitmapFactory::decodeStream)
     }.getOrNull()
 
-    private fun stableNotificationId(threadId: Long): Int = (threadId xor (threadId ushr 32)).toInt()
+    private fun stableNotificationId(threadId: Long): Int = IncomingSmsNotifications.notificationId(threadId)
 
     private fun ensureChannel() {
         // IMPORTANCE_HIGH is required for heads-up (pop-up) notifications on API 26+. A channel's

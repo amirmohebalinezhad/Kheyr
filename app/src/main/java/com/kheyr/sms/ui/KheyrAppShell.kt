@@ -82,7 +82,9 @@ import com.kheyr.sms.onboarding.DefaultSmsRoleChecker
 import com.kheyr.sms.onboarding.OnboardingGateState
 import com.kheyr.sms.onboarding.OnboardingCopy
 import com.kheyr.sms.preferences.AppPreferences
+import androidx.core.app.NotificationManagerCompat
 import com.kheyr.sms.receiver.ActiveConversation
+import com.kheyr.sms.receiver.IncomingSmsNotifications
 import com.kheyr.sms.settings.HelpFeedbackModel
 import com.kheyr.sms.settings.NotificationSettings
 import com.kheyr.sms.settings.SettingsCategory
@@ -294,8 +296,12 @@ fun KheyrAppShell(
         conversationSearchActive = false
         conversationSearchQuery = ""
         composerState = composerStateForThread(thread)
-        // Tell the receive pipeline which chat is on screen so it skips notifying for it (B-33).
+        // Tell the receive pipeline which chat is on screen so it skips notifying for it, and clear
+        // any notification already posted for this thread. Suppressing new ones is only half of
+        // B-33: without the cancel, a notification raised a moment earlier stays on screen for a
+        // conversation the user is now reading, and suppression means nothing will ever replace it.
         ActiveConversation.setOpen(thread.id)
+        NotificationManagerCompat.from(context).cancel(IncomingSmsNotifications.notificationId(thread.id))
         scope.launch {
             // Load the messages before switching screens so the conversation slides in already
             // populated, instead of sliding in empty and popping the bubbles in a frame later.
