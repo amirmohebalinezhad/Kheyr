@@ -29,7 +29,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -46,7 +45,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -121,7 +119,12 @@ private sealed interface InboxPane {
 
 // Captures exactly which messages a deferred delete should remove. Deleting by the snapshot's ids
 // (instead of the whole thread) means messages that arrive while the undo snackbar is visible survive.
-private data class PendingThreadDelete(val threadId: Long, val messageIds: List<Long>)
+private data class PendingThreadDelete(
+    val threadId: Long,
+    // Captured up front: once the Room rows are gone there is no way to look these up again, and they
+    // are what the deferred system-SMS-store delete needs.
+    val telephonyIds: List<Long>,
+)
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
@@ -299,18 +302,22 @@ fun KheyrAppShell(
 
     fun openConversationForRecipient(recipient: NewMessageRecipient) {
         val existing = threads.firstOrNull { contactRepository.matchesAddress(it.address, recipient.address) }
-        val threadId = existing?.id ?: ThreadIdResolver.getOrCreateThreadId(context, recipient.address)
-        openConversation(
-            existing?.copy(displayName = recipient.displayName.ifBlank { existing.displayName }, contactPhotoUri = recipient.photoUri ?: existing.contactPhotoUri)
-                ?: SmsThread(
-                    id = threadId,
-                    address = recipient.address,
-                    displayName = recipient.displayName.ifBlank { recipient.address },
-                    lastMessage = "",
-                    lastMessageAt = Instant.now(),
-                    contactPhotoUri = recipient.photoUri,
-                ),
-        )
+        val target = if (existing != null) {
+            existing.copy(
+                displayName = recipient.displayName.ifBlank { existing.displayName },
+                contactPhotoUri = recipient.photoUri ?: existing.contactPhotoUri,
+            )
+        } else {
+            SmsThread(
+                id = ThreadIdResolver.getOrCreateThreadId(context, recipient.address),
+                address = recipient.address,
+                displayName = recipient.displayName.ifBlank { recipient.address },
+                lastMessage = "",
+                lastMessageAt = Instant.now(),
+                contactPhotoUri = recipient.photoUri,
+            )
+        }
+        openConversation(target)
     }
 
     fun openConversationForContact(contact: DeviceContact) {
@@ -404,8 +411,10 @@ fun KheyrAppShell(
     suspend fun commitPendingDelete() {
         val pending = pendingDelete ?: return
         pendingDelete = null
-        // Delete only the messages captured at delete time, leaving any that arrived during the undo window.
-        repository.deleteMessagesByIds(pending.messageIds)
+        // The Room rows already went at delete time so the list updated immediately. The system SMS
+        // store is only touched here, once the undo window has closed - that split is what makes Undo
+        // able to give the messages back at all (B-14).
+        repository.deleteTelephonyMessages(pending.telephonyIds)
     }
 
     fun deleteThreadWithUndo(thread: SmsThread) {
@@ -414,11 +423,12 @@ fun KheyrAppShell(
             val folder = chatFolder.toThreadFolder()
             val snapshot = repository.loadLocalMessageEntities(thread.id)
             val snapshotIds = snapshot.map { it.id }
-            pendingDelete = PendingThreadDelete(thread.id, snapshotIds)
-            // Delete the snapshot rows now so the optimistic removal matches persisted state. Only
-            // these ids are removed, so messages that arrive during the undo window survive; Undo
-            // re-inserts the snapshot as the sole copies instead of duplicating still-present rows.
-            repository.deleteMessagesByIds(snapshotIds)
+            pendingDelete = PendingThreadDelete(thread.id, snapshot.mapNotNull { it.telephonyId })
+            // Room only, so the optimistic removal matches persisted state while the system SMS rows
+            // stay put until the undo window closes. Only these ids are removed, so messages that
+            // arrive during the window survive; Undo re-inserts the snapshot as the sole copies
+            // instead of duplicating still-present rows.
+            repository.deleteLocalMessagesByIds(snapshotIds)
             threads = ThreadListOptimisticUpdate.applyAction(threads, thread, ThreadBulkAction.Delete)
             threads = ThreadListOptimisticUpdate.filterForFolder(threads, folder)
             if (selectedThread?.id == thread.id) {
@@ -1699,9 +1709,9 @@ private fun ConversationScreenContent(
                 value = searchQuery,
                 onValueChange = onSearchQueryChange,
                 placeholder = "Search in conversation",
-                modifier = Modifier
-                    .padding(top = topInset, start = 8.dp, end = 8.dp, bottom = 8.dp)
-                    .focusRequester(searchFocusRequester),
+                modifier = Modifier.padding(top = topInset, start = 8.dp, end = 8.dp, bottom = 8.dp),
+                // KheyrSearchField attaches the requester to the inner text field itself; adding a
+                // second .focusRequester for the same instance here would register it twice.
                 focusRequester = searchFocusRequester,
             )
         }
