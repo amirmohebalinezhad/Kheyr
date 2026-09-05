@@ -1,7 +1,6 @@
 package com.kheyr.sms.contacts
 
 import android.Manifest
-import android.content.ContentUris
 import android.content.Context
 import android.content.pm.PackageManager
 import android.database.ContentObserver

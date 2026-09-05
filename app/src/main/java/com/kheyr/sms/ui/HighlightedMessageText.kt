@@ -23,6 +23,15 @@ fun HighlightedMessageText(
     val highlightRanges = highlightRanges(text, highlight)
     val textDirection = MessageTextDirection.resolve(text)
     val textStyle = MaterialTheme.typography.bodyLarge.copy(textDirection = textDirection)
+    // buildAnnotatedString's builder lambda is not composable, so the theme colors have to be
+    // read here, in composition, and captured.
+    val linkStyles = TextLinkStyles(
+        style = SpanStyle(
+            color = MaterialTheme.colorScheme.primary,
+            textDecoration = TextDecoration.Underline,
+        ),
+    )
+    val highlightStyle = SpanStyle(background = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
 
     if (links.isEmpty() && highlightRanges.isEmpty()) {
         Text(text, modifier = modifier, style = textStyle)
@@ -33,20 +42,10 @@ fun HighlightedMessageText(
         segments(text, links, highlightRanges).forEach { segment ->
             val content = text.substring(segment.start, segment.end)
             if (segment.linkUrl != null) {
-                pushLink(
-                    LinkAnnotation.Url(
-                        url = segment.linkUrl,
-                        styles = TextLinkStyles(
-                            style = SpanStyle(
-                                color = MaterialTheme.colorScheme.primary,
-                                textDecoration = TextDecoration.Underline,
-                            ),
-                        ),
-                    ),
-                )
+                pushLink(LinkAnnotation.Url(url = segment.linkUrl, styles = linkStyles))
             }
             if (segment.highlighted) {
-                withStyle(SpanStyle(background = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))) {
+                withStyle(highlightStyle) {
                     append(content)
                 }
             } else {
