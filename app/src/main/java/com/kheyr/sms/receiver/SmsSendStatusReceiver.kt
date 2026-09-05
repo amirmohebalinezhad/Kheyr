@@ -6,7 +6,6 @@ import android.content.Context
 import android.content.Intent
 import android.telephony.SmsMessage
 import android.util.Log
-import com.kheyr.sms.data.SmsRefreshEvents
 import com.kheyr.sms.data.SmsRepository
 import com.kheyr.sms.telephony.SmsSender
 
@@ -17,20 +16,21 @@ class SmsSendStatusReceiver : BroadcastReceiver() {
         val partCount = intent.getIntExtra(SmsSender.EXTRA_PART_COUNT, 1).coerceAtLeast(1)
         val callbackResult = resultCode
         val reportStatus = deliveryReportStatus(intent)
+        val appContext = context.applicationContext
         val pendingResult = goAsync()
         Thread {
             try {
-                val repository = SmsRepository(context)
+                val repository = SmsRepository(appContext)
                 when (intent.action) {
                     SmsSender.ACTION_SMS_SENT -> {
                         if (SmsSendStatusDecider.sentSucceeded(callbackResult)) {
-                            if (recordSuccessfulPart(context, "sent", messageId, partIndex, partCount)) {
+                            if (recordSuccessfulPart(appContext, "sent", messageId, partIndex, partCount)) {
                                 repository.markSent(messageId)
                                 repository.notifyRefreshForTelephonyId(messageId)
                             }
                         } else {
-                            clearPartProgress(context, "sent", messageId)
-                            clearPartProgress(context, "delivered", messageId)
+                            clearPartProgress(appContext, "sent", messageId)
+                            clearPartProgress(appContext, "delivered", messageId)
                             repository.markFailed(messageId)
                             repository.notifyRefreshForTelephonyId(messageId)
                         }
@@ -39,12 +39,12 @@ class SmsSendStatusReceiver : BroadcastReceiver() {
                         // The network is still trying; the message keeps whatever status it has.
                         DeliveryOutcome.Pending -> Unit
                         DeliveryOutcome.Delivered ->
-                            if (SmsSendStatusDecider.sentSucceeded(callbackResult) && recordSuccessfulPart(context, "delivered", messageId, partIndex, partCount)) {
+                            if (SmsSendStatusDecider.sentSucceeded(callbackResult) && recordSuccessfulPart(appContext, "delivered", messageId, partIndex, partCount)) {
                                 repository.markDelivered(messageId)
                                 repository.notifyRefreshForTelephonyId(messageId)
                             }
                         DeliveryOutcome.Failed -> {
-                            clearPartProgress(context, "delivered", messageId)
+                            clearPartProgress(appContext, "delivered", messageId)
                             repository.markFailed(messageId)
                             repository.notifyRefreshForTelephonyId(messageId)
                         }

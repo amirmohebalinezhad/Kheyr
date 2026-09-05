@@ -159,16 +159,22 @@ class SmsRepository(
             }
         }
 
-    suspend fun markThreadRead(threadId: Long) =
+    suspend fun markThreadRead(threadId: Long): Unit =
         withContext(Dispatchers.IO) {
             smsDao.markThreadRead(threadId)
             val values = ContentValues().apply { put(Telephony.Sms.READ, 1) }
-            context.contentResolver.update(
-                Telephony.Sms.CONTENT_URI,
-                values,
-                "${Telephony.Sms.THREAD_ID} = ? AND ${Telephony.Sms.READ} = 0",
-                arrayOf(threadId.toString()),
-            )
+            try {
+                context.contentResolver.update(
+                    Telephony.Sms.CONTENT_URI,
+                    values,
+                    "${Telephony.Sms.THREAD_ID} = ? AND ${Telephony.Sms.READ} = 0",
+                    arrayOf(threadId.toString()),
+                )
+            } catch (e: SecurityException) {
+                // Writing to the provider is refused once the app is no longer the default SMS
+                // handler; the local read state is already committed, so this must not throw (B-22).
+                Log.w(TAG, "Unable to mark the thread read in the SMS provider", e)
+            }
         }
 
     fun updateSendStatus(messageId: Long, status: MessageStatus) {
