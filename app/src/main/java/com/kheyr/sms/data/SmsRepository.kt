@@ -48,8 +48,14 @@ class SmsRepository(
         refreshRecentOutgoingMessages()
     }
 
+    /**
+     * Imports exactly these provider rows. Callers use this right after writing a message to the
+     * provider themselves (send, retry, notification reply), so it is a positive assertion that the
+     * rows are live: any tombstone on those ids is stale and is dropped rather than honoured.
+     */
     suspend fun syncTelephonyMessagesByIds(telephonyIds: List<Long>) = withContext(Dispatchers.IO) {
         if (telephonyIds.isEmpty()) return@withContext
+        forgetDeletedTelephonyIds(telephonyIds)
         syncTelephonyMessages(telephonyIds = telephonyIds)
     }
 
@@ -143,12 +149,23 @@ class SmsRepository(
      * cannot stomp an explicit user "Not spam" correction (B-23), so the sync event is only queued
      * when the flag actually took.
      */
-    fun autoMarkSpam(threadId: Long) {
-        smsDao.autoMarkSpam(threadId)
-        if (smsDao.isThreadSpam(threadId) != true) return
-        enqueueForSync { store ->
-            store.enqueueThreadState(threadId, "spam", JSONObject().put("is_spam", true))
+    /**
+     * Flags [threadId] as spam unless the user has already corrected it with "Not spam".
+     *
+     * Returns whether the thread is spam afterwards, so the receive pipeline can tell "hidden as
+     * spam" from "the user's correction stands" and still notify in the second case.
+     */
+    fun autoMarkSpam(threadId: Long): Boolean {
+        val wasSpam = smsDao.isThreadSpam(threadId) == true
+        if (!smsDao.autoMarkSpam(threadId)) return false
+        // Only on the transition: re-enqueueing an identical event for every message on an
+        // already-flagged spam thread would grow sync_queue without adding information.
+        if (!wasSpam) {
+            enqueueForSync { store ->
+                store.enqueueThreadState(threadId, "spam", JSONObject().put("is_spam", true))
+            }
         }
+        return true
     }
 
     suspend fun updateMuted(threadId: Long, muted: Boolean) =
@@ -287,7 +304,11 @@ class SmsRepository(
             // Rows the user deleted must never come back. Filtering only in findMissingTelephonyIds is
             // not enough: deleting the newest thread lowers latestSyncedTelephonyId, so the plain
             // "newer than" query reaches those rows again on the very next refresh (B-13).
-            val tombstoned = deletedTelephonyIds()
+            //
+            // Only the discovery paths are filtered. An explicit id list means the caller just wrote
+            // that row and wants it imported; the provider reuses rowids, so honouring a tombstone
+            // there would silently drop a message the user actually sent.
+            val tombstoned = if (telephonyIds == null) deletedTelephonyIds() else emptySet()
             while (cursor.moveToNext()) {
                 val telephonyId = cursor.getLong(id)
                 if (telephonyId in tombstoned) continue
@@ -436,14 +457,36 @@ class SmsRepository(
 
     private fun recordDeletedTelephonyIds(telephonyIds: List<Long>) {
         if (telephonyIds.isEmpty()) return
-        val merged = LinkedHashSet(readDeletedTelephonyIds())
-        // Re-added at the end so the newest ids are the ones that survive the bound below.
-        merged.removeAll(telephonyIds.toSet())
-        merged.addAll(telephonyIds)
-        val bounded = merged.toList().takeLast(MAX_DELETED_TELEPHONY_IDS)
-        deletedTelephonyIdPrefs.edit()
-            .putString(KEY_DELETED_TELEPHONY_IDS, bounded.joinToString(","))
-            .apply()
+        // Read-modify-write, and this runs from the UI coroutine, the bulk-delete loop and the
+        // notification-action thread, so serialise it or concurrent deletes drop each other's ids.
+        synchronized(TOMBSTONE_LOCK) {
+            val merged = LinkedHashSet(readDeletedTelephonyIds())
+            // Re-added at the end so the newest ids are the ones that survive the bound below.
+            merged.removeAll(telephonyIds.toSet())
+            merged.addAll(telephonyIds)
+            val bounded = merged.toList().takeLast(MAX_DELETED_TELEPHONY_IDS)
+            deletedTelephonyIdPrefs.edit()
+                .putString(KEY_DELETED_TELEPHONY_IDS, bounded.joinToString(","))
+                .commit()
+        }
+    }
+
+    /**
+     * Drops tombstones for ids the provider has handed back to us as live rows again.
+     *
+     * The SMS provider does not use AUTOINCREMENT, so SQLite reuses the rowid of a deleted message:
+     * delete the newest thread and the next SMS you send can be assigned one of the ids you just
+     * tombstoned. Without this the tombstone would swallow that brand-new message - it would go out
+     * over the air and never appear in the conversation.
+     */
+    private fun forgetDeletedTelephonyIds(telephonyIds: List<Long>) {
+        if (telephonyIds.isEmpty()) return
+        synchronized(TOMBSTONE_LOCK) {
+            val remaining = readDeletedTelephonyIds() - telephonyIds.toSet()
+            deletedTelephonyIdPrefs.edit()
+                .putString(KEY_DELETED_TELEPHONY_IDS, remaining.joinToString(","))
+                .commit()
+        }
     }
 
     suspend fun loadLocalMessageEntities(threadId: Long): List<SmsMessageEntity> = withContext(Dispatchers.IO) {
@@ -657,6 +700,9 @@ class SmsRepository(
         // Only ids the gap window (SYNC_ID_GAP_WINDOW) can still reach matter, so a bounded set of the
         // most recent deletions is enough and can never grow without limit.
         private const val MAX_DELETED_TELEPHONY_IDS = 2000
+
+        /** Process-wide guard for the tombstone read-modify-write; SmsRepository is constructed per use. */
+        private val TOMBSTONE_LOCK = Any()
     }
     private fun SmsMessageEntity.toModel() = SmsMessage(
         id = id,

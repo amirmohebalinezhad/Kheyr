@@ -161,10 +161,16 @@ interface SmsDao {
      * "Not spam" correction and never touches [ThreadStateEntity.userNotSpam] itself.
      */
     @Transaction
-    fun autoMarkSpam(threadId: Long) {
+    /**
+     * Returns false when the user has restored this thread with "Not spam", meaning the classifier
+     * does not get to touch it; the caller must then treat the message as a normal inbox message
+     * rather than silently suppressing it.
+     */
+    fun autoMarkSpam(threadId: Long): Boolean {
         ensureThreadState(threadId)
-        if (isUserNotSpam(threadId) == true) return
+        if (isUserNotSpam(threadId) == true) return false
         markSpamAutomatically(threadId)
+        return true
     }
 
     @Query("UPDATE thread_state SET isSpam = 1 WHERE threadId = :threadId")

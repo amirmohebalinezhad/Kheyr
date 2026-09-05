@@ -108,10 +108,14 @@ abstract class AppDatabase : RoomDatabase() {
                 )
             }
             synchronized(this) {
-                runCatching { database.close() }
-                instance = null
+                // Keep the SAME AppDatabase instance rather than swapping `instance`. SmsRepository
+                // captures its DAO at construction, and the main thread can already hold one by the
+                // time this startup check runs; replacing the instance would leave those DAOs bound
+                // to a closed database and crash the very launch this is meant to heal. Closing just
+                // the open helper lets the same instance open a fresh file underneath.
+                runCatching { database.openHelper.close() }
                 appContext.deleteDatabase(EncryptedDatabasePolicy.databaseFileName)
-                instance = buildEncryptedDatabase(appContext).also { it.openHelper.readableDatabase }
+                database.openHelper.readableDatabase
             }
         }
 

@@ -48,7 +48,23 @@ class SmsReceiveHandlerTest {
         assertTrue(harness.lastNotificationWasUnknownSender)
     }
 
-    private class Harness(knownContacts: Set<String> = emptySet()) {
+    @Test fun spamScoringMessageOnAThreadTheUserRestoredStillNotifies() {
+        // B-23 regression: autoMarkSpam refuses to re-hide a corrected thread, but the handler used
+        // to return SpamSuppressed regardless, so every later message from that sender arrived
+        // silently - the message sat in the inbox with no notification, forever.
+        val harness = Harness(treatSpamAsSpam = false)
+
+        val result = harness.handle(IncomingSms("+989991234", "winner visit https://bad.example", 10L, 9L, 1, 7))
+
+        assertEquals(IncomingSmsResult.NotificationPosted, result)
+        assertEquals(1, harness.notifications)
+    }
+
+    private class Harness(
+        knownContacts: Set<String> = emptySet(),
+        // false models a thread the user has restored with "Not spam": the store refuses to flag it.
+        private val treatSpamAsSpam: Boolean = true,
+    ) {
         val spamMessages = mutableListOf<IncomingSms>()
         val inboxMessages = mutableListOf<IncomingSms>()
         var notifications = 0
@@ -58,7 +74,7 @@ class SmsReceiveHandlerTest {
             contactLookup = SenderContactLookup { it in knownContacts },
             spamStore = SpamMessageStore { message, _, _ ->
                 spamMessages += message
-                stored(message)
+                SpamPersistOutcome(stored(message), treatedAsSpam = treatSpamAsSpam)
             },
             inboxStore = InboxMessageStore { message ->
                 inboxMessages += message

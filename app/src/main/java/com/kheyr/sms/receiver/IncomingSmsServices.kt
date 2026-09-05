@@ -50,12 +50,17 @@ class RoomIncomingSmsStore(
     private val markSpam: Boolean,
     private val ownNumberResolver: OwnNumberResolver,
 ) : SpamMessageStore, InboxMessageStore {
-    override fun persistSpam(message: IncomingSms, score: Int, triggeredRuleIds: List<String>): StoredIncomingSms =
-        persist(message, spam = true)
+    override fun persistSpam(message: IncomingSms, score: Int, triggeredRuleIds: List<String>): SpamPersistOutcome {
+        // Default true: if the own-number short circuit in persist() returns before classifying, the
+        // message is one of our own and is suppressed anyway.
+        var treatedAsSpam = true
+        val stored = persist(message, spam = true) { treatedAsSpam = it }
+        return SpamPersistOutcome(stored, treatedAsSpam)
+    }
 
-    override fun persistInbox(message: IncomingSms): StoredIncomingSms = persist(message, spam = false)
+    override fun persistInbox(message: IncomingSms): StoredIncomingSms = persist(message, spam = false) {}
 
-    private fun persist(message: IncomingSms, spam: Boolean): StoredIncomingSms {
+    private fun persist(message: IncomingSms, spam: Boolean, onSpamFlagged: (Boolean) -> Unit): StoredIncomingSms {
         if (!spam && ownNumberResolver.isOwnNumber(message.sender)) {
             runBlocking(Dispatchers.IO) {
                 repository.recentOutgoingThreadId(message.sender, message.body)
@@ -102,8 +107,9 @@ class RoomIncomingSmsStore(
             simSlot = message.subscriptionId,
         )
         // autoMarkSpam is a no-op once the user has restored the thread with "Not spam", so a later
-        // spam-scoring message cannot hide a conversation the user explicitly corrected.
-        if (spam || markSpam) repository.autoMarkSpam(threadId)
+        // spam-scoring message cannot hide a conversation the user explicitly corrected. It reports
+        // back whether the thread really is spam now, so the caller can still notify when it is not.
+        if (spam || markSpam) onSpamFlagged(repository.autoMarkSpam(threadId))
         return StoredIncomingSms(
             threadId,
             message.sender,
