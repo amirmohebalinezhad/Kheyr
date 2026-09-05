@@ -7,6 +7,8 @@ import com.kheyr.sms.sync.crypto.SmsBodyEncryptor
 import java.time.Instant
 import javax.crypto.spec.SecretKeySpec
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class SyncRetryPolicyTest {
@@ -47,10 +49,16 @@ class SyncRetryPolicyTest {
             encryptor = SmsBodyEncryptor(key),
         )
 
-        assertEquals(0, uploader.uploadPending())
+        val failed = uploader.uploadPending()
+        assertEquals(0, failed.uploaded)
+        // Reported as a rejection, not as an empty queue, so SyncWorker can return Result.retry() and
+        // WorkManager backs off instead of waiting out a whole period (B-48).
+        assertTrue(failed.rejected)
         assertEquals(listOf(1L), store.pendingRecords().map { it.queueId })
 
-        assertEquals(1, uploader.uploadPending())
+        val retried = uploader.uploadPending()
+        assertEquals(1, retried.uploaded)
+        assertFalse(retried.rejected)
         assertEquals(emptyList<Long>(), store.pendingRecords().map { it.queueId })
         assertEquals(2, api.attempts)
     }

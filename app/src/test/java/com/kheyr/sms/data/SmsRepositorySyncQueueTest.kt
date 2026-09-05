@@ -119,6 +119,24 @@ class SmsRepositorySyncQueueTest {
         assertTrue(dao.messagesForThread(4).isEmpty())
     }
 
+    @Test fun undoingADeleteQueuesTheRestoredRowsUnderTheirNewIds() = runBlocking {
+        enableSync()
+        val originalId = repository.insertIncomingSms(threadId = 5, address = "+989120000000", body = "undo me")
+        val snapshot = repository.loadLocalMessageEntities(5)
+        repository.deleteLocalMessagesByIds(listOf(originalId))
+
+        repository.restoreThreadMessages(snapshot)
+
+        // The row comes back under a fresh AUTOINCREMENT id, so the sync event has to carry that id
+        // and not the snapshot's. Uploading the old one would key the restored copy to the row the
+        // delete event already removed, and the other devices would keep believing it is gone.
+        val restored = dao.messagesForThread(5).single()
+        assertTrue("restore should not reuse the deleted row's id", restored.id != originalId)
+        val queued = pending().filterIsInstance<MessageChangeSyncRecord>().last()
+        assertEquals(restored.id, queued.message.id)
+        assertEquals("undo me", queued.message.body)
+    }
+
     @Test fun initialBackfillQueuesEveryLocalMessage() = runBlocking {
         dao.insertIncomingSms(entity(threadId = 1, body = "one"))
         dao.insertIncomingSms(entity(threadId = 2, body = "two"))

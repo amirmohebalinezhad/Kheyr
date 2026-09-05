@@ -36,10 +36,6 @@ class KheyrApiService(
 ) : com.kheyr.sms.sync.SyncApiClient {
     private val jsonMedia = "application/json; charset=utf-8".toMediaType()
 
-    // The sync worker and the UI can hit a 401 at the same time; only one of them may spend the
-    // (single-use) refresh token, the other replays with whatever token that refresh produced.
-    private val refreshLock = Any()
-
     fun fetchSpamRules(): SpamRuleSet? = getJson("/api/v1/spam-rules/latest")?.let(::parseSpamRuleSet)
 
     fun submitSpamFeedback(payload: JSONObject): Boolean = postJson("/api/v1/spam-feedback", payload) != null
@@ -248,10 +244,11 @@ class KheyrApiService(
     }
 
     /**
-     * Serialises concurrent refreshes: a caller that finds the stored access token already changed
-     * from the one its request sent skips the refresh and simply replays with the newer token.
+     * Serialises concurrent refreshes across every instance in the process (see [REFRESH_LOCK]): a
+     * caller that finds the stored access token already changed from the one its request sent skips
+     * the refresh and simply replays with the newer token.
      */
-    private fun refreshAccessToken(staleAuthorizationHeader: String?): Boolean = synchronized(refreshLock) {
+    private fun refreshAccessToken(staleAuthorizationHeader: String?): Boolean = synchronized(REFRESH_LOCK) {
         val current = tokenProvider()
         // Another caller refreshed while we waited for the lock; the refresh token is single-use, so
         // do not spend it again — just replay with the token that refresh produced.
@@ -337,6 +334,16 @@ class KheyrApiService(
          * The only sanctioned way to build the service: it wires reading, refreshing and persisting
          * the token pair together so every caller survives the 60-minute access-token lifetime (B-04).
          */
+        /**
+         * Process-wide, deliberately: the UI and each worker call [create] for themselves and so hold
+         * separate [KheyrApiService] instances over the SAME persisted token pair; an instance-local lock
+         * would let two of them hit a 401 at once and both spend the single-use refresh token. The
+         * second spend is rejected by the backend, and on a server that rotates the whole token
+         * family it can log the device out. Serialising here means the loser of the race finds the
+         * freshly stored access token in [refreshAccessToken] and simply replays with it.
+         */
+        private val REFRESH_LOCK = Any()
+
         fun create(preferences: AppPreferences): KheyrApiService = KheyrApiService(
             tokenProvider = { preferences.authTokens().first },
             refreshTokenProvider = { preferences.authTokens().second },

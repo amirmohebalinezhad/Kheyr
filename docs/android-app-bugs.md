@@ -9,15 +9,16 @@ Severity scale: **Critical** = nothing ships / crash loop, **High** = feature do
 
 **Status.** All of these have since been fixed on this branch except B-24, which is deliberately deferred
 (applying downloaded sync changes needs decryption, merge semantics and a live backend to validate against).
-Three further bugs found while fixing the rest are recorded below as B-38 to B-40, and four more that the
-fixes themselves introduced — caught by two adversarial reviews of the branch diff — as B-41 to B-45.
+Three further bugs found while fixing the rest are recorded below as B-38 to B-40, and more that the
+fixes themselves introduced — caught by two adversarial reviews of the branch diff — as B-41 to B-45,
+and by the pull request's automated reviewer as B-46 to B-49.
 B-41 is worth reading even if nothing else here is: the fix for a data-loss bug created a worse one, in
 which a message the user sent went out over the air and never appeared in the conversation. Reviewing
 the fixes turned out to matter as much as writing them.
 
 Each entry keeps its original description so the reasoning behind the fix stays readable; the **Status**
 column above says what was actually done. Fixing the list took the unit suite from a source set that did
-not compile to **224 passing tests**, `:app:lintDebug` to zero errors, and `:app:assembleDebug` back to
+not compile to **225 passing tests**, `:app:lintDebug` to zero errors, and `:app:assembleDebug` back to
 producing an APK.
 
 ## Summary
@@ -64,6 +65,10 @@ producing an APK.
 | [B-38](#b-38) | Low | CI | Job-summary step runs the artifact name as a shell command | fixed |
 | [B-39](#b-39) | High | Build | No Gradle heap configured, so dex merging dies with OutOfMemoryError | fixed |
 | [B-40](#b-40) | Medium | UI | The per-thread action menu is dead UI: `showThreadMenu` is never assigned | fixed |
+| [B-46](#b-46) | High | Sync | Undoing a delete re-uploaded the messages under the ids the delete removed | fixed |
+| [B-47](#b-47) | High | Data loss | The startup database recovery raced the first query, deleting the file underneath it | fixed |
+| [B-48](#b-48) | Medium | Sync | A refused upload reported success, so WorkManager never backed off and retried | fixed |
+| [B-49](#b-49) | Medium | Account | Per-instance refresh lock let two API instances spend the same single-use refresh token | fixed |
 
 ---
 
@@ -826,6 +831,86 @@ serious findings were again in the fixes rather than in the original code.
 - **Initial backfill queues messages only.** Existing pin/archive/spam/mute state is never uploaded, so
   a user who enables sync after months of curation backfills the messages but none of the organisation.
   It only corrects itself when the user next toggles each thread.
+
+---
+
+## Found in review of the pull request
+
+A third review pass, this one by the automated reviewer on the pull request rather than by me. All four
+findings were checked against the code before anything was changed; all four turned out to be real, and
+all four are fixed. B-48 sits on top of a defect recorded above as fixed, which is a fair reminder that
+patching the symptom a review named is not the same as fixing everything wrong at that line.
+
+<a id="b-46"></a>
+### B-46. Undoing a delete re-uploaded the messages under their old ids (High)
+
+`app/src/main/java/com/kheyr/sms/data/SmsRepository.kt`
+
+`restoreThreadMessages` puts the snapshot back with `insertSmsBatch(messages.map { it.copy(id = 0) })`,
+so every row returns under a **new** `AUTOINCREMENT` primary key. The sync events, though, were built
+from the snapshot objects, which still carried the ids the rows had before the delete:
+
+```kotlin
+smsDao.insertSmsBatch(messages.map { it.copy(id = 0) })
+enqueueForSync { store -> messages.forEach { store.enqueueMessage(it.toModel()) } }
+```
+
+The delete events queued moments earlier name those same old ids. A receiving device therefore applies
+"delete message 41" and then "here is message 41 again", and any backend that processes the queue in
+order — or that treats a delete as a tombstone — ends up with the thread still gone, which is exactly
+the outcome the re-queue exists to prevent. Locally the message is back, so the user sees no sign of it.
+
+`insertSmsBatch` now returns the row id each message actually received and the enqueue loop uses them.
+Covered by `SmsRepositorySyncQueueTest.undoingADeleteQueuesTheRestoredRowsUnderTheirNewIds`.
+
+<a id="b-47"></a>
+### B-47. The database recovery raced the first query (High)
+
+`app/src/main/java/com/kheyr/sms/KheyrApplication.kt`, `data/AppDatabase.kt`
+
+The B-05 fix runs `ensureOpenOrRecreate` on a detached thread from `onCreate` — it has to, because
+key derivation and a rebuild are far too slow to hold up process start. Nothing waited for it. When the
+store really is undecryptable, that thread closes the open helper, deletes the database file and reopens
+it, and any query issued in that window runs against a file being deleted underneath it. A cold start
+triggered by an incoming SMS is the likely case: the receiver and the recovery start at the same moment.
+The failure mode is the crash B-05 exists to heal, now caused by the healing.
+
+`AppDatabase` now arms a latch for the duration of the startup check and `getInstance` waits on it, so a
+caller is only handed a DAO once the store is known good. The wait is skipped on the main thread (Room
+will not run a query there anyway, and stalling it on key derivation would risk an ANR) and bounded at
+20 seconds so a wedged check degrades to the old behaviour rather than hanging a worker for good. On a
+normal launch the latch is null and nothing waits.
+
+<a id="b-48"></a>
+### B-48. A rejected sync upload reported success to WorkManager (Medium)
+
+`app/src/main/java/com/kheyr/sms/worker/SyncWorker.kt`, `sync/SyncUploader.kt`
+
+`uploadPending` returned a plain count, and 0 meant both "the backend refused the upload" and "there was
+nothing queued". `doWork` could not tell them apart, so it returned `Result.success()` either way and
+WorkManager applied no backoff. A refused upload then waited out a full periodic interval before being
+retried, even if the network came back seconds later.
+
+`uploadPending` now returns a `SyncUploadOutcome` carrying `rejected`, and `doWork` maps that to
+`Result.retry()`. Only a refused upload retries: an empty queue is a success, and a null download is how
+an unconfigured backend reads, which must not put the worker into a permanent retry loop. This is the
+one recorded above as "the sync worker stamped 'last synced' even on a failed upload" — the stamping was
+fixed then, the retry semantics were not.
+
+<a id="b-49"></a>
+### B-49. Two API instances could spend the same single-use refresh token (Medium)
+
+`app/src/main/java/com/kheyr/sms/api/KheyrApiService.kt`
+
+The lock serialising token refreshes was a per-instance field, but the UI (`KheyrAppShell`) and each of
+the two workers call `KheyrApiService.create(preferences)` for themselves, over the same persisted token
+pair. Two of those instances hitting a 401 at the same time both entered `refreshAccessToken`, both saw
+an unchanged access token, and both spent the refresh token. The second spend is rejected, and on a backend that rotates the whole token
+family it invalidates the pair the first call had just stored — signing the device out.
+
+The lock is now a companion-object (process-wide) one, so the loser of the race finds the freshly stored
+access token in the guard that was already there and replays with it instead of refreshing again. The
+guard was written for exactly this race in the B-04 fix; making it instance-scoped is what defeated it.
 
 ---
 

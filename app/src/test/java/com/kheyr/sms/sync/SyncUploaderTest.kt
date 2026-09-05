@@ -28,7 +28,7 @@ class SyncUploaderTest {
         val api = CapturingApiClient()
         val logger = CapturingLogger()
 
-        val uploaded = SyncUploader(
+        val outcome = SyncUploader(
             settingsProvider = { SyncSettings(enabled = true, deviceId = "device-1") },
             queueStore = store,
             apiClient = api,
@@ -36,7 +36,8 @@ class SyncUploaderTest {
             logger = logger,
         ).uploadPending()
 
-        assertEquals(1, uploaded)
+        assertEquals(1, outcome.uploaded)
+        assertFalse(outcome.rejected)
         val payloadString = api.uploaded.single().toString()
         assertFalse(payloadString.contains(plaintext))
         assertTrue(api.uploaded.single().event is EncryptedSmsMessageDto)
@@ -62,14 +63,14 @@ class SyncUploaderTest {
         )
         val api = CapturingApiClient()
 
-        val uploaded = SyncUploader(
+        val outcome = SyncUploader(
             settingsProvider = { SyncSettings(enabled = true, deviceId = "device-1") },
             queueStore = store,
             apiClient = api,
             encryptor = SmsBodyEncryptor(key),
         ).uploadPending()
 
-        assertEquals(1, uploaded)
+        assertEquals(1, outcome.uploaded)
         assertEquals(2L, api.uploaded.single().queueId)
         assertFalse(api.uploaded.toString().contains("old deleted body"))
         assertEquals(listOf(2L, 1L), store.uploadedQueueIds)
@@ -89,7 +90,7 @@ class SyncUploaderTest {
         )
         val api = CapturingApiClient(succeeds = false)
 
-        val uploaded = SyncUploader(
+        val outcome = SyncUploader(
             settingsProvider = { SyncSettings(enabled = true, deviceId = "device-1") },
             queueStore = store,
             apiClient = api,
@@ -98,8 +99,11 @@ class SyncUploaderTest {
 
         // An offline window or a 5xx must not consume the queue: nothing is deleted or marked, so the
         // next run retries the same rows (B-06).
-        assertEquals(0, uploaded)
+        assertEquals(0, outcome.uploaded)
         assertEquals(emptyList<Long>(), store.uploadedQueueIds)
+        // A refused upload must be distinguishable from an empty queue, or SyncWorker reports success
+        // and WorkManager applies no backoff (B-48).
+        assertTrue(outcome.rejected)
     }
 
     @Test fun syncIsOffByDefault() {

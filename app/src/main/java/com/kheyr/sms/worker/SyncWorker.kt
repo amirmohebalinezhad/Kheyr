@@ -39,11 +39,11 @@ class SyncWorker(appContext: Context, params: WorkerParameters) : CoroutineWorke
             .getOrElse { return Result.retry() }
         val encryptor = SmsBodyEncryptor(encryptionKey)
         val uploader = SyncUploader({ syncSettings }, queueStore, api, encryptor)
-        val uploaded = uploader.uploadPending()
-        // Only stamp on a CONFIRMED upload. uploadPending returns 0 both when the upload failed and
-        // when there was nothing queued; in neither case has anything newly succeeded, and stamping
-        // on a failed run would show the user a fresh "last synced" time while their queue backs up.
-        if (syncSettings.canUpload && uploaded > 0) {
+        val outcome = uploader.uploadPending()
+        // Only stamp on a CONFIRMED upload. An upload count of 0 means either the upload failed or
+        // there was nothing queued; in neither case has anything newly succeeded, and stamping on a
+        // failed run would show the user a fresh "last synced" time while their queue backs up.
+        if (syncSettings.canUpload && outcome.uploaded > 0) {
             preferences.saveSyncSettings(syncSettings.copy(lastSuccessfulUploadAt = Instant.now()))
         }
 
@@ -52,7 +52,12 @@ class SyncWorker(appContext: Context, params: WorkerParameters) : CoroutineWorke
             val result = SyncDownloader().parse(cursor, response.changes.length(), response.nextCursor, response.hasMore)
             preferences.saveSyncCursor(result.nextCursor)
         }
-        return Result.success()
+        // A rejected upload has to be reported as a failure, otherwise WorkManager records the run as
+        // done, applies no backoff, and the queued events wait for the next periodic tick - up to a
+        // whole interval - even though the backend may be reachable again seconds later. Only a
+        // refused upload retries: "nothing queued" is a success, and a null download is how an
+        // unconfigured backend reads, which must not put the worker into a permanent retry loop.
+        return if (outcome.rejected) Result.retry() else Result.success()
     }
 
     private companion object {

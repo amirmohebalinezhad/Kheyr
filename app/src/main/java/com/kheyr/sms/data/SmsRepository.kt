@@ -506,10 +506,20 @@ class SmsRepository(
      */
     suspend fun restoreThreadMessages(messages: List<SmsMessageEntity>) = withContext(Dispatchers.IO) {
         if (messages.isEmpty()) return@withContext
-        smsDao.insertSmsBatch(messages.map { it.copy(id = 0) })
+        // The snapshot is re-inserted with id = 0, so every row comes back under a NEW primary key.
+        // The sync events have to carry those new ids: uploading the snapshot's old ids would key the
+        // restored copy to rows that no longer exist locally, so the delete events already sitting in
+        // sync_queue would still win and the other devices would keep believing the thread is gone.
+        val reinserted = messages.map { it.copy(id = 0) }
+        val newIds = smsDao.insertSmsBatch(reinserted)
         forgetDeletedTelephonyIds(messages.mapNotNull { it.telephonyId })
         enqueueForSync { store ->
-            messages.forEach { store.enqueueMessage(it.toModel()) }
+            reinserted.forEachIndexed { index, message ->
+                // insertSmsBatch reports -1 for a row it did not insert; only enqueue what landed.
+                newIds.getOrNull(index)?.takeIf { it > 0 }?.let { id ->
+                    store.enqueueMessage(message.copy(id = id).toModel())
+                }
+            }
         }
     }
 

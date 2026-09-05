@@ -44,10 +44,16 @@ interface SmsDao {
         return insertMessage(message)
     }
 
+    /**
+     * Inserts a batch and reports the row id each message actually received, in the order given.
+     *
+     * The ids matter to the caller: an entity handed in with `id = 0` gets a fresh AUTOINCREMENT id,
+     * so anything keyed by message id afterwards - the sync payload above all - has to use the new
+     * id rather than whatever the in-memory copy was carrying. `insertMessage` ignores conflicts and
+     * reports -1 when it did not insert, and that value is passed through unchanged.
+     */
     @Transaction
-    fun insertSmsBatch(messages: List<SmsMessageEntity>) {
-        messages.forEach { insertSms(it) }
-    }
+    fun insertSmsBatch(messages: List<SmsMessageEntity>): List<Long> = messages.map { insertSms(it) }
 
     @Query("SELECT COALESCE(MAX(telephonyId), 0) FROM messages WHERE telephonyId IS NOT NULL")
     fun latestSyncedTelephonyId(): Long
