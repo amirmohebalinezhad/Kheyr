@@ -47,6 +47,20 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+      # Lint is clean as of this commit, so enforce it before it drifts back. Keeping it after the
+      # tests means a lint regression never masks a real test failure in the log.
+      - name: Run Android lint
+        run: gradle --no-daemon :app:lintDebug
+
+      - name: Upload lint report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: kheyr-lint-report-${{ github.sha }}
+          path: app/build/reports/lint-results-debug.html
+          if-no-files-found: warn
+          retention-days: 30
+
       - name: Build debug APK
         run: gradle --no-daemon :app:assembleDebug
 

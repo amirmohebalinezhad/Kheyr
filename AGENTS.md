@@ -49,5 +49,8 @@ with a correlated `COUNT(*)` sub-select (so `SmsDaoTest` passes), and the `SmsRe
 lint error no longer exists (that file is now 24 lines long).
 
 - **Known issues:** see `docs/android-app-bugs.md` for the current list of open bugs.
-- **Lint:** `:app:lintDebug` has NOT been re-verified since the code it flagged changed. Run it
-  yourself before relying on it; do not assume it is clean.
+- **Lint:** `:app:lintDebug` passes with 0 errors (23 warnings remain). CI enforces it, so a new lint
+  error fails the build. The one error that used to fail it was
+  `UnusedMaterial3ScaffoldPaddingParameter`: the app shell is edge-to-edge and insets its own chrome,
+  so the Scaffold's content padding is ignored on purpose and that check is suppressed at
+  `KheyrAppShell` with a comment explaining why.

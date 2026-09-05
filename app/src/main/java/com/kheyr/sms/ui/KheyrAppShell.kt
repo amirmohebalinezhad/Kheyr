@@ -126,6 +126,11 @@ private data class PendingThreadDelete(
     val telephonyIds: List<Long>,
 )
 
+// The Scaffold's content padding is deliberately ignored: this screen is edge-to-edge and places its
+// own chrome (top bar, bottom nav, conversation bar) as overlays inside a Box, insetting each one via
+// KheyrChromeInsets / statusBarsPadding / navigationBarsPadding. Consuming the Scaffold padding as well
+// would inset the same system bars twice.
+@Suppress("UnusedMaterial3ScaffoldPaddingParameter")
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun KheyrAppShell(
