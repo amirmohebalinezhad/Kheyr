@@ -40,6 +40,10 @@ class HeadlessSmsSendService : Service() {
             try {
                 messageId = repository.persistOutgoing(recipient, body, null)
                 repository.markSending(messageId)
+                // Import the row we just wrote, as the composer does: a later discovery sync honours
+                // delete tombstones, and provider rowids are reused, so a respond-via-message send
+                // could otherwise be dropped for matching a previously deleted id (B-41).
+                repository.syncTelephonyMessagesByIds(listOf(messageId))
                 sender.send(com.kheyr.sms.telephony.SmsSendRequest(recipient, body, null, messageId))
             } catch (t: Throwable) {
                 messageId?.let { repository.markFailed(it) }

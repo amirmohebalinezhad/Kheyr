@@ -2,10 +2,21 @@
 <!--
   Auto Backup rules for API <= 30 (android:fullBackupContent).
 
-  The SQLCipher database and the Keystore-wrapped preference files are excluded: their
-  keys live in the device's hardware Keystore and are NOT part of the backup set, so a
-  restore onto another device (or after a factory reset) would produce ciphertext that
-  can never be decrypted. Backing them up buys nothing and leaks encrypted user data.
+  Two kinds of state must never be backed up.
+
+  1. The SQLCipher database and the Keystore-wrapped preference files: their keys live in the
+     device's hardware Keystore and are NOT part of the backup set, so a restore onto another
+     device (or after a factory reset) would produce ciphertext that can never be decrypted.
+     Backing them up buys nothing and leaks encrypted user data.
+
+  2. Anything keyed by a system SMS provider rowid or a local Room row id. Those ids are
+     reassigned by a restore, so the state comes back pointing at unrelated messages. The
+     delete tombstones are the dangerous one: restored with the database excluded, they would
+     silently suppress every restored SMS whose new rowid happens to collide with an id the
+     user once deleted on the old phone.
+
+  Invariant: if a file is keyed by row ids, exclude it together with the database that gave
+  those ids meaning - never independently of it.
 -->
 <full-backup-content>
     <!-- SQLCipher database plus the journal/WAL siblings Room may leave alongside it. -->
@@ -18,4 +29,8 @@
     <exclude domain="sharedpref" path="kheyr_secure_db.xml" />
     <exclude domain="sharedpref" path="kheyr_sync_key_store.xml" />
     <exclude domain="sharedpref" path="kheyr_prefs.xml" />
+
+    <!-- Row-id-keyed state, meaningless and harmful once the provider reassigns ids. -->
+    <exclude domain="sharedpref" path="kheyr_deleted_telephony_ids.xml" />
+    <exclude domain="sharedpref" path="sms_send_status_parts.xml" />
 </full-backup-content>

@@ -72,6 +72,7 @@ import com.kheyr.sms.conversation.ConversationSearchMatcher
 import com.kheyr.sms.contacts.ContactRepository
 import com.kheyr.sms.contacts.DeviceContact
 import com.kheyr.sms.conversation.SearchableMessage
+import com.kheyr.sms.data.AppDatabase
 import com.kheyr.sms.data.SmsMessage
 import com.kheyr.sms.data.SmsRefreshEvents
 import com.kheyr.sms.data.SmsRepository
@@ -640,9 +641,15 @@ fun KheyrAppShell(
                         refreshThreadsLocal()
                     }
                     if (selectedThread?.id == event.threadId) {
-                        // The user is looking at this thread, so the arriving message is already read;
-                        // without this the unread badge keeps climbing until they navigate back.
-                        repository.markThreadRead(event.threadId)
+                        // Only mark read when the conversation is genuinely ON SCREEN. selectedThread
+                        // survives backgrounding - the composition is not destroyed by ON_STOP - so
+                        // keying this off it alone marked messages that arrived while the user was in
+                        // another app as read, in Room and in the system store, before they had seen
+                        // them. ActiveConversation is cleared on ON_STOP, which is exactly the
+                        // distinction needed here.
+                        if (ActiveConversation.isOpen(event.threadId)) {
+                            repository.markThreadRead(event.threadId)
+                        }
                         messages = repository.loadLocalMessages(event.threadId)
                         selectedThread = threads.filterOrFind(event.threadId) ?: selectedThread
                     }
@@ -813,7 +820,7 @@ fun KheyrAppShell(
                                         onLogout = {
                                             scope.launch(Dispatchers.IO) {
                                                 api.logout()
-                                                clearLocalSession(preferences)
+                                                clearLocalSession(context, preferences)
                                                 withContext(Dispatchers.Main) {
                                                     realtimeClient?.stop()
                                                     statusMessage = "Signed out"
@@ -829,7 +836,7 @@ fun KheyrAppShell(
                                         onDeleteAccount = {
                                             scope.launch(Dispatchers.IO) {
                                                 api.deleteAccount()
-                                                clearLocalSession(preferences)
+                                                clearLocalSession(context, preferences)
                                                 withContext(Dispatchers.Main) {
                                                     realtimeClient?.stop()
                                                     statusMessage = "Account deleted"
@@ -983,8 +990,11 @@ fun KheyrAppShell(
                                                 composerState = state
                                                 val text = state.body.trim()
                                                 scope.launch {
+                                                    // Hoisted so the catch can resolve a row that was already persisted.
+                                                    var persistedTelephonyId: Long? = null
                                                     try {
                                                         val telephonyId = repository.persistOutgoing(thread.address, text, subscriptionId)
+                                                        persistedTelephonyId = telephonyId
                                                         repository.markSending(telephonyId)
                                                         repository.syncTelephonyMessagesByIds(listOf(telephonyId))
                                                         sender.send(SmsSendRequest(thread.address, text, subscriptionId, telephonyId))
@@ -993,9 +1003,18 @@ fun KheyrAppShell(
                                                         refreshThreadsLocal()
                                                     } catch (t: Exception) {
                                                         if (t is kotlinx.coroutines.CancellationException) throw t
+                                                        // The row is already stored as "sending", but send() threw before the
+                                                        // telephony stack accepted it, so no PendingIntent was ever registered
+                                                        // and SmsSendStatusReceiver will never resolve it. Left alone the bubble
+                                                        // spins on "Sending" forever with no Retry, because showRetry is driven
+                                                        // by MessageStatus.Failed. Mark it failed so the user can retry.
+                                                        persistedTelephonyId?.let { id ->
+                                                            runCatching { withContext(Dispatchers.IO) { repository.markFailed(id) } }
+                                                        }
                                                         // BodyChanged clears `error` but not `sending`, so without this the
                                                         // Send button stays disabled until the chat is reopened (B-09).
                                                         composerState = composerReducer.reduce(composerState, SmsComposerEvent.SendFailed)
+                                                        messages = repository.loadLocalMessages(thread.id)
                                                         statusMessage = "Couldn't send the message. Make sure Kheyr is your default SMS app."
                                                     }
                                                 }
@@ -1016,8 +1035,12 @@ fun KheyrAppShell(
                                                     } catch (t: Exception) {
                                                         if (t is kotlinx.coroutines.CancellationException) throw t
                                                         // send() throws on an undialable recipient or a revoked SEND_SMS;
-                                                        // uncaught here it would kill the process (B-10).
+                                                        // uncaught here it would kill the process (B-10). markSending has
+                                                        // already moved the row out of Failed, so put it back: otherwise one
+                                                        // failed retry turns a retryable message into a permanent "Sending".
+                                                        runCatching { withContext(Dispatchers.IO) { repository.markFailed(telephonyId) } }
                                                         composerState = composerReducer.reduce(composerState, SmsComposerEvent.SendFailed)
+                                                        messages = repository.loadLocalMessages(thread.id)
                                                         statusMessage = "Couldn't send the message. Make sure Kheyr is your default SMS app."
                                                     }
                                                 }
@@ -1049,6 +1072,11 @@ fun KheyrAppShell(
                                     } else {
                                         syncEnabled = enabled
                                         preferences.saveSyncSettings(preferences.syncSettings().copy(enabled = enabled))
+                                        // Nothing is queued while sync is off, so arm the one-time
+                                        // backfill again on the way down. Without this, re-enabling
+                                        // sync leaves everything received during the off period
+                                        // permanently absent from the cloud.
+                                        if (!enabled) preferences.initialBackfillDone = false
                                         KheyrWorkerScheduler.scheduleAll(context, enabled)
                                     }
                                 },
@@ -2044,11 +2072,15 @@ private const val PRIVACY_POLICY_URL = "https://kheyr.app/privacy"
  * changes neither the default-SMS role nor any permission, so replaying onboarding would be a
  * pointless dead end (B-20). Clearing initialBackfillDone makes a later sign-in backfill again.
  */
-private fun clearLocalSession(preferences: AppPreferences) {
+private fun clearLocalSession(context: android.content.Context, preferences: AppPreferences) {
     preferences.clearAuthTokens()
     preferences.userPhone = null
     preferences.saveSyncSettings(preferences.syncSettings().copy(enabled = false, deviceId = null))
     preferences.initialBackfillDone = false
+    preferences.saveSyncCursor(null)
+    // The queue holds plaintext bodies queued by the account that is signing out. Leaving them would
+    // upload one person's messages under whoever signs in next on this device.
+    runCatching { AppDatabase.getInstance(context).syncQueueDao().deleteAll() }
 }
 
 /** Launches an intent, ignoring the case where no app can handle it (avoids ActivityNotFoundException crashes). */

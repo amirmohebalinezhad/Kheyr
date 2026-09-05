@@ -161,6 +161,16 @@ class KheyrApiService(
             // Send the full envelope (algorithm + nonce + ciphertext); the nonce is required to
             // decrypt and was previously dropped, making every synced body undecryptable.
             put("encrypted_body", event.encryptedBody.wireFormat())
+            // The DTO carries these and they were all being dropped, so a receiving device had no
+            // way to place a message in time or tell an incoming one from an outgoing one - every
+            // synced message would render as "incoming, received now". The address is the salted
+            // hash, never the raw number (EncryptedFieldPolicy treats it as protected).
+            put("hashed_address", event.hashedAddress)
+            put("timestamp", event.timestamp.toString())
+            put("direction", event.direction.name)
+            put("status", event.status.name)
+            put("is_spam", event.isSpam)
+            event.simSlot?.let { put("sim_slot", it) }
         }
         is com.kheyr.sms.sync.DeleteEventDto -> JSONObject().apply {
             put("type", "message_deleted")
