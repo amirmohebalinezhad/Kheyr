@@ -21,26 +21,36 @@ class SpamScorer(private val ruleSet: SpamRuleSet) {
     fun score(sender: String, body: String, senderIsContact: Boolean): SpamScore {
         // Once per message, before any rule runs: the rules are written against normalized text.
         val normalizedBody = PersianTextNormalizer.normalize(body)
-        val safeRule = ruleSet.rules.firstOrNull {
-            it.enabled && it.type == SpamRuleType.KnownSafeSender && matches(it, sender, normalizedBody, senderIsContact)
-        }
-        if (safeRule != null) {
-            return SpamScore(0, listOf(safeRule.id), SpamClassification.Normal)
-        }
         var total = 0
         val triggered = mutableListOf<String>()
-        ruleSet.rules.filter { it.enabled }.forEach { rule ->
-            if (matches(rule, sender, normalizedBody, senderIsContact)) {
-                total += rule.score
-                triggered += rule.id
+        // Insertion-ordered so that ties resolve on pack order rather than on hash order.
+        val categoryScores = LinkedHashMap<String, Int>()
+        var safeRuleId: String? = null
+
+        // One pass over the rules accumulates both axes. A KnownSafeSender match zeroes the spam
+        // axis but must not stop the category axis, or safe senders lose categorization entirely.
+        ruleSet.rules.forEach { rule ->
+            if (!rule.enabled || !matches(rule, sender, normalizedBody, senderIsContact)) return@forEach
+            if (rule.type == SpamRuleType.KnownSafeSender && safeRuleId == null) safeRuleId = rule.id
+            total += rule.score
+            triggered += rule.id
+            rule.category?.let { category ->
+                categoryScores[category] = (categoryScores[category] ?: 0) + rule.categoryWeight
             }
+        }
+        // maxByOrNull keeps the first entry on a tie, and the map preserves pack order.
+        val category = categoryScores.maxByOrNull { it.value }?.key
+
+        val safeRule = safeRuleId
+        if (safeRule != null) {
+            return SpamScore(0, listOf(safeRule), SpamClassification.Normal, categoryScores, category)
         }
         val classification = when {
             total >= ruleSet.threshold -> SpamClassification.Spam
             total >= SUSPICIOUS_THRESHOLD -> SpamClassification.Suspicious
             else -> SpamClassification.Normal
         }
-        return SpamScore(total, triggered, classification)
+        return SpamScore(total, triggered, classification, categoryScores, category)
     }
 
     private fun matches(rule: SpamRule, sender: String, body: String, senderIsContact: Boolean): Boolean = when (rule.type) {

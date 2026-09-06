@@ -109,16 +109,29 @@ class AppPreferences(context: Context) {
 
     fun saveSpamRuleSet(ruleSet: SpamRuleSet) {
         val encoded = ruleSet.rules.joinToString("\n") { rule ->
-            listOf(Uri.encode(rule.id), rule.type.name, Uri.encode(rule.pattern.orEmpty()), rule.score, rule.enabled).joinToString("|")
+            listOf(
+                Uri.encode(rule.id),
+                rule.type.name,
+                Uri.encode(rule.pattern.orEmpty()),
+                rule.score,
+                rule.enabled,
+                Uri.encode(rule.category.orEmpty()),
+                rule.categoryScore,
+            ).joinToString("|")
         }
         prefs.edit()
             .putInt(KEY_SPAM_VERSION, ruleSet.version)
             .putInt(KEY_SPAM_THRESHOLD, ruleSet.threshold)
+            .putInt(KEY_SPAM_CACHE_FORMAT, SPAM_CACHE_FORMAT)
             .putString(KEY_SPAM_RULES, encoded)
             .apply()
     }
 
     fun loadSpamRuleSet(default: SpamRuleSet): SpamRuleSet {
+        // decodeRule drops any rule it cannot parse, so a cache written in an older field layout
+        // would degrade the rule set one rule at a time with nothing surfaced. Invalidate wholesale
+        // instead and fall back to the defaults until the next fetch rewrites the cache.
+        if (prefs.getInt(KEY_SPAM_CACHE_FORMAT, LEGACY_SPAM_CACHE_FORMAT) != SPAM_CACHE_FORMAT) return default
         val encoded = prefs.getString(KEY_SPAM_RULES, null) ?: return default
         val rules = encoded.lineSequence().mapNotNull(::decodeRule).toList()
         if (rules.isEmpty()) return default
@@ -158,7 +171,7 @@ class AppPreferences(context: Context) {
 
     private fun decodeRule(encoded: String): SpamRule? {
         val parts = encoded.split('|')
-        if (parts.size != 5) return null
+        if (parts.size != ENCODED_RULE_FIELDS) return null
         return runCatching {
             SpamRule(
                 id = Uri.decode(parts[0]),
@@ -166,6 +179,8 @@ class AppPreferences(context: Context) {
                 pattern = Uri.decode(parts[2]).ifBlank { null },
                 score = parts[3].toInt(),
                 enabled = parts[4].toBoolean(),
+                category = Uri.decode(parts[5]).ifBlank { null },
+                categoryScore = parts[6].toInt(),
             )
         }.getOrNull()
     }
@@ -193,6 +208,18 @@ class AppPreferences(context: Context) {
         private const val KEY_SPAM_VERSION = "spam_version"
         private const val KEY_SPAM_THRESHOLD = "spam_threshold"
         private const val KEY_SPAM_RULES = "spam_rules"
+        private const val KEY_SPAM_CACHE_FORMAT = "spam_cache_format"
+
+        /**
+         * Field layout of the cached rule encoding. Bump it whenever the encoded shape of a rule
+         * changes, so an older cache is dropped as a whole instead of parsed rule by rule.
+         */
+        private const val SPAM_CACHE_FORMAT = 2
+
+        /** What a cache written before the format was versioned reads back as. */
+        private const val LEGACY_SPAM_CACHE_FORMAT = 1
+
+        private const val ENCODED_RULE_FIELDS = 7
         private const val KEY_BLOCKED_SENDERS = "blocked_senders"
         private const val KEY_SYNC_CURSOR = "sync_cursor"
     }
