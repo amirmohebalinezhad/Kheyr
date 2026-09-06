@@ -1,0 +1,166 @@
+{
+  "version": 2,
+  "threshold": 70,
+  "rules": [
+    {
+      "id": "fa-otp",
+      "type": "message_regex",
+      "pattern": "(?:کد\\s*(?:تایید|تأیید|ورود|فعال\\s?سازی|اعتبارسنجی|یکبار\\s?مصرف)|رمز\\s*(?:پویا|دوم|عبور|یکبار)|verification\\s+code|\\bCode\\b)(?:\\s+\\S+){0,3}\\s*[:：#]?\\s*\\d{4,8}\\b",
+      "score": -70,
+      "enabled": true,
+      "category": "otp"
+    },
+    {
+      "id": "fa-money-txn",
+      "type": "message_regex",
+      "pattern": "(?:واریز|برداشت|انتقال|پرداخت|مانده|موجودی)\\D{0,15}[\\d,،]{4,}\\s*(?:ریال|تومان|تومن)|(?:مانده|موجودی)\\s*[:：]?\\s*[\\d,،]{4,}",
+      "score": -55,
+      "enabled": true,
+      "category": "financial"
+    },
+    {
+      "id": "fa-card-acct",
+      "type": "message_regex",
+      "pattern": "کارت\\s*\\d{4}|\\*{2,}\\d{4}|شبا|شماره\\s*حساب",
+      "score": -35,
+      "enabled": true,
+      "category": "financial"
+    },
+    {
+      "id": "fa-order-track",
+      "type": "message_regex",
+      "pattern": "شماره\\s*(?:سفارش|مرسوله|پیگیری|رهگیری)|کد\\s*(?:پیگیری|رهگیری|تحویل|مرسوله)|سفارش(?:\\s*شما|تون|ت\\b|ات\\b)|مرسوله|بسته\\s*(?:شما|تون)|ارسال\\s*شد|تحویل\\s*(?:شد|داده)|بازه\\s*ارسال|در\\s*حال\\s*آماده|مرجوع",
+      "score": -45,
+      "enabled": true,
+      "category": "delivery"
+    },
+    {
+      "id": "fa-official",
+      "type": "message_regex",
+      "pattern": "مودی|ابلاغ|اخطاریه|پرونده\\s*قضایی|شناسه\\s*ملی|امور\\s*مالیاتی|تامین\\s*اجتماعی|تأمین\\s*اجتماعی|پروانه\\s*کسب|قوه\\s*قضاییه|سامانه\\s*ثنا|نظام\\s*صنفی|دادگاه|احضار",
+      "score": -70,
+      "enabled": true,
+      "category": "official"
+    },
+    {
+      "id": "fa-acct-event",
+      "type": "message_regex",
+      "pattern": "ورود\\s*به\\s*(?:حساب|موبایل\\s*بانک|اینترنت\\s*بانک|همراه\\s*بانک|پنل)|لاگین|تغییر\\s*رمز|دستگاه\\s*جدید",
+      "score": -50,
+      "enabled": true,
+      "category": "security"
+    },
+    {
+      "id": "fa-appointment",
+      "type": "message_regex",
+      "pattern": "نوبت\\s*(?:شما|دهی)|ساعت\\s*مراجعه|تاریخ\\s*مراجعه|رزرو\\s*شما|بلیت\\s*شما|پرواز\\s*شما",
+      "score": -45,
+      "enabled": true,
+      "category": "booking"
+    },
+    {
+      "id": "fa-service-alert",
+      "type": "message_regex",
+      "pattern": "سرویس\\s.{0,40}(?:بالا\\s*آمد|پایین\\s*است|قطع|اختلال)|مدت\\s*قطعی|دیتاسنتر|نگه\\s?داری",
+      "score": -50,
+      "enabled": true,
+      "category": "service"
+    },
+    {
+      "id": "fa-pct-off",
+      "type": "message_regex",
+      "pattern": "\\d{1,3}\\s*(?:%|٪|درصد)",
+      "score": 25,
+      "enabled": true,
+      "category": "advertising"
+    },
+    {
+      "id": "fa-promo-word",
+      "type": "message_regex",
+      "pattern": "تخفیف|حراج|جشنواره|آفر|پیشنهاد\\s*ویژه|شگفت\\s?انگیز|فروش\\s*ویژه|کمپین|بلک\\s?فرایدی",
+      "score": 30,
+      "enabled": true,
+      "category": "advertising"
+    },
+    {
+      "id": "fa-urgency",
+      "type": "message_regex",
+      "pattern": "فقط\\s*تا|آخرین\\s*فرصت|تا\\s*پایان\\s*امشب|تا\\s*امشب|مهلت|فرصت\\s*محدود|جا\\s*نمون|از\\s*دست\\s*نده|ظرفیت\\s*محدود|تا\\s*فردا",
+      "score": 20,
+      "enabled": true,
+      "category": "advertising"
+    },
+    {
+      "id": "fa-gift-prize",
+      "type": "message_regex",
+      "pattern": "هدیه|جایزه|قرعه\\s?کشی|برنده|شانس|بن\\s*خرید|اعتبار\\s*هدیه",
+      "score": 18,
+      "enabled": true,
+      "category": "advertising"
+    },
+    {
+      "id": "fa-cta-arrow",
+      "type": "message_regex",
+      "pattern": "👇|👈|🔗|کلیک\\s*کنید|همین\\s*حالا|اقدام\\s*کنید|بزن\\s*بریم",
+      "score": 15,
+      "enabled": true,
+      "category": "advertising"
+    },
+    {
+      "id": "fa-promo-code",
+      "type": "message_regex",
+      "pattern": "کد\\s*(?:تخفیف|هدیه|شارژ)?\\s*[:：]?\\s*(?=[A-Za-z0-9_\\-]{3,}\\b)(?=[A-Za-z0-9_\\-]*[A-Za-z])[A-Za-z0-9_\\-]{3,}",
+      "score": 35,
+      "enabled": true,
+      "category": "advertising"
+    },
+    {
+      "id": "fa-shortlink",
+      "type": "message_regex",
+      "pattern": "(?i)\\b[a-z0-9.\\-]{2,14}\\.(?:ir|me|link|co|al|in|eu|biz|io|net|com)/[A-Za-z0-9_\\-]{3,}",
+      "score": 18,
+      "enabled": true,
+      "category": "advertising"
+    },
+    {
+      "id": "fa-price-list",
+      "type": "message_regex",
+      "pattern": "[\\d,،]{3,}\\s*(?:تومان|تومن|ریال)[\\s\\S]{0,60}[\\d,،]{3,}\\s*(?:تومان|تومن|ریال)",
+      "score": 15,
+      "enabled": true,
+      "category": "advertising"
+    },
+    {
+      "id": "fa-digit-cta",
+      "type": "message_regex",
+      "pattern": "(?m)(?:ارسال|مشاوره|اطلاع|قیمت|دریافت|تماس)\\s*(?:عدد|کد)?\\s*[:⬅️👈]?\\s*\\d{1,2}\\s*$|(?:عدد|کد)\\s*\\d{1,2}\\s*(?:را\\s*)?(?:ارسال|بفرست)",
+      "score": 30,
+      "enabled": true,
+      "category": "advertising"
+    },
+    {
+      "id": "fa-phone-cta",
+      "type": "message_regex",
+      "pattern": "☎|📞|تماس\\s*[:：]?\\s*0?\\d{7,}|\\b0(?:21|26|31|41|51|66|71|9\\d{2})\\d{7,8}\\b",
+      "score": 15,
+      "enabled": true,
+      "category": "advertising"
+    },
+    {
+      "id": "fa-bulk-ad-composite",
+      "type": "message_regex",
+      "pattern": "(?is)^(?=[\\s\\S]*لغو\\s*=?\\s*1)(?![\\s\\S]*(?:کد\\s*(?:تایید|تأیید|ورود|فعال\\s?سازی|اعتبارسنجی)|رمز\\s*(?:پویا|دوم|یکبار)|مانده|موجودی|واریز|برداشت|سفارش\\s*شما|مرسوله|ارسال\\s*شد|تحویل\\s*شد|ابلاغ|اخطاریه|مودی))(?=[\\s\\S]*(?:https?://|www\\.|[a-z0-9\\-]{2,}\\.(?:ir|com|co|net|me|link|biz)|☎|📞|\\b0(?:21|26|31|9\\d{2})\\d{7,8}\\b))[\\s\\S]*$",
+      "score": 35,
+      "enabled": true,
+      "category": "advertising"
+    },
+    {
+      "id": "fa-vas-bait",
+      "type": "message_regex",
+      "pattern": "عضویت\\s*شما\\s*لغو|برای\\s*عضویت\\s*مجدد|فعالسازی\\s*مجدد\\s*ارسال\\s*عدد|برای\\s*عضویت\\s*عدد",
+      "score": 45,
+      "enabled": true,
+      "category": "scam"
+    }
+  ]
+}
