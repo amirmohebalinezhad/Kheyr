@@ -3,7 +3,7 @@ package com.kheyr.sms.receiver
 import com.kheyr.sms.data.SmsRefreshEvents
 import com.kheyr.sms.domain.SpamClassification
 import com.kheyr.sms.domain.SpamRuleSet
-import com.kheyr.sms.domain.SpamScorer
+import com.kheyr.sms.domain.SpamScorerCache
 
 /** Coordinates incoming SMS spam suppression before any notification policy is evaluated. */
 class SmsReceiveHandler(
@@ -16,7 +16,7 @@ class SmsReceiveHandler(
 ) {
     fun handle(message: IncomingSms): IncomingSmsResult {
         val senderIsContact = contactLookup.isKnownContact(message.sender)
-        val score = SpamScorer(spamRules.activeRuleSet()).score(message.sender, message.body, senderIsContact)
+        val score = SpamScorerCache.scorerFor(spamRules.activeRuleSet()).score(message.sender, message.body, senderIsContact)
         return if (score.classification == SpamClassification.Spam) {
             val outcome = spamStore.persistSpam(message, score.total, score.triggeredRuleIds)
             // An open Spam folder is driven by the same refresh events as the inbox, so it needs one
