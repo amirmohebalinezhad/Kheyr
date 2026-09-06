@@ -28,6 +28,7 @@ import com.kheyr.sms.data.AppDatabase
 import com.kheyr.sms.data.SmsRepository
 import com.kheyr.sms.domain.SpamClassification
 import com.kheyr.sms.domain.SpamRuleSet
+import com.kheyr.sms.domain.SpamScore
 import com.kheyr.sms.notifications.IncomingNotificationActions
 import com.kheyr.sms.preferences.AppPreferences
 import com.kheyr.sms.settings.NotificationContentMode
@@ -50,17 +51,23 @@ class RoomIncomingSmsStore(
     private val markSpam: Boolean,
     private val ownNumberResolver: OwnNumberResolver,
 ) : SpamMessageStore, InboxMessageStore {
-    override fun persistSpam(message: IncomingSms, score: Int, triggeredRuleIds: List<String>): SpamPersistOutcome {
+    override fun persistSpam(message: IncomingSms, score: SpamScore): SpamPersistOutcome {
         // Default true: if the own-number short circuit in persist() returns before classifying, the
         // message is one of our own and is suppressed anyway.
         var treatedAsSpam = true
-        val stored = persist(message, spam = true) { treatedAsSpam = it }
+        val stored = persist(message, score, spam = true) { treatedAsSpam = it }
         return SpamPersistOutcome(stored, treatedAsSpam)
     }
 
-    override fun persistInbox(message: IncomingSms): StoredIncomingSms = persist(message, spam = false) {}
+    override fun persistInbox(message: IncomingSms, score: SpamScore): StoredIncomingSms =
+        persist(message, score, spam = false) {}
 
-    private fun persist(message: IncomingSms, spam: Boolean, onSpamFlagged: (Boolean) -> Unit): StoredIncomingSms {
+    private fun persist(
+        message: IncomingSms,
+        score: SpamScore,
+        spam: Boolean,
+        onSpamFlagged: (Boolean) -> Unit,
+    ): StoredIncomingSms {
         if (!spam && ownNumberResolver.isOwnNumber(message.sender)) {
             runBlocking(Dispatchers.IO) {
                 repository.recentOutgoingThreadId(message.sender, message.body)
@@ -105,6 +112,10 @@ class RoomIncomingSmsStore(
             // it from sub_id and every reader passes it to getSmsManagerForSubscriptionId), so writing
             // the physical slot index here would route replies out the wrong SIM.
             simSlot = message.subscriptionId,
+            // The verdict is recorded per message: a commercial sender's thread mixes promotions
+            // with delivery notices, so the thread-level metadata cannot stand in for it.
+            categoryId = score.category,
+            spamScore = score.total,
         )
         // autoMarkSpam is a no-op once the user has restored the thread with "Not spam", so a later
         // spam-scoring message cannot hide a conversation the user explicitly corrected. It reports

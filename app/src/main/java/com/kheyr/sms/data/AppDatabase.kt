@@ -14,8 +14,16 @@ import java.util.concurrent.TimeUnit
 import net.sqlcipher.database.SupportFactory
 
 @Database(
-    entities = [SmsThreadEntity::class, SmsMessageEntity::class, ThreadStateEntity::class, SyncSpamMetadataEntity::class, SyncQueueEntity::class],
-    version = 3,
+    entities = [
+        SmsThreadEntity::class,
+        SmsMessageEntity::class,
+        ThreadStateEntity::class,
+        SyncSpamMetadataEntity::class,
+        SyncQueueEntity::class,
+        CategoryEntity::class,
+        SenderCategoryEntity::class,
+    ],
+    version = 4,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -64,6 +72,42 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * Migration from schema v3 to v4, adding the message-category axis. The deltas are the
+         * per-message `categoryId` and `spamScore` columns - per message rather than per thread,
+         * because a commercial sender mixes promotions and delivery notices in one thread - plus
+         * the `categories` and `sender_category` tables that back user-assigned categories.
+         *
+         * The DDL mirrors what Room generates for the v4 entities exactly, so an upgraded store and
+         * a fresh install end up with the same schema. `spamScore` needs its DEFAULT because SQLite
+         * refuses to add a NOT NULL column to a populated table without one.
+         */
+        val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `messages` ADD COLUMN `categoryId` TEXT")
+                db.execSQL("ALTER TABLE `messages` ADD COLUMN `spamScore` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `categories` (" +
+                        "`id` TEXT NOT NULL, " +
+                        "`name` TEXT NOT NULL, " +
+                        "`isBuiltIn` INTEGER NOT NULL DEFAULT 0, " +
+                        "`colorKey` TEXT, " +
+                        "`sortOrder` INTEGER NOT NULL DEFAULT 0, " +
+                        "`createdAt` INTEGER NOT NULL, " +
+                        "`deletedAt` INTEGER, " +
+                        "PRIMARY KEY(`id`))",
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `sender_category` (" +
+                        "`senderKey` TEXT NOT NULL, " +
+                        "`categoryId` TEXT NOT NULL, " +
+                        "`source` TEXT NOT NULL, " +
+                        "`assignedAt` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`senderKey`))",
+                )
+            }
+        }
+
         fun getInstance(context: Context): AppDatabase {
             val database = instance ?: synchronized(this) {
                 instance ?: buildEncryptedDatabase(context.applicationContext).also { instance = it }
@@ -101,7 +145,7 @@ abstract class AppDatabase : RoomDatabase() {
             // wiping the user's encrypted SMS store.
             return Room.databaseBuilder(context, AppDatabase::class.java, EncryptedDatabasePolicy.databaseFileName)
                 .openHelperFactory(factory)
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build()
         }
 
