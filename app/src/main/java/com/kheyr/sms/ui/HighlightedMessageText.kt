@@ -4,6 +4,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLinkStyles
@@ -18,6 +19,8 @@ fun HighlightedMessageText(
     text: String,
     highlight: String?,
     modifier: Modifier = Modifier,
+    linkColor: Color = MaterialTheme.colorScheme.primary,
+    highlightColor: Color = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f),
 ) {
     val links = MessageLinkDetector.findAll(text)
     val highlightRanges = highlightRanges(text, highlight)
@@ -27,11 +30,11 @@ fun HighlightedMessageText(
     // read here, in composition, and captured.
     val linkStyles = TextLinkStyles(
         style = SpanStyle(
-            color = MaterialTheme.colorScheme.primary,
+            color = linkColor,
             textDecoration = TextDecoration.Underline,
         ),
     )
-    val highlightStyle = SpanStyle(background = MaterialTheme.colorScheme.primary.copy(alpha = 0.35f))
+    val highlightStyle = SpanStyle(background = highlightColor)
 
     if (links.isEmpty() && highlightRanges.isEmpty()) {
         Text(text, modifier = modifier, style = textStyle)
