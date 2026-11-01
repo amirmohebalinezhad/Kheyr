@@ -6,6 +6,7 @@ import com.kheyr.sms.contacts.ContactRepository
 import com.kheyr.sms.data.AppDatabase
 import com.kheyr.sms.data.SmsRepository
 import com.kheyr.sms.preferences.AppPreferences
+import com.kheyr.sms.spam.BundledSpamRuleSet
 import com.kheyr.sms.telephony.OwnNumberResolver
 
 object SmsReceiveHandlerFactory {
@@ -18,7 +19,7 @@ object SmsReceiveHandlerFactory {
         val contactRepository = ContactRepository(appContext)
         val store = RoomIncomingSmsStore(appContext, repository, preferences, markSpam = false, ownNumberResolver = ownNumberResolver)
         return SmsReceiveHandler(
-            spamRules = PreferencesSpamRulesProvider(preferences, DefaultSpamRuleSet.rules),
+            spamRules = PreferencesSpamRulesProvider(preferences, BundledSpamRuleSet.load(appContext)),
             contactLookup = AndroidContactLookup(appContext),
             spamStore = RoomIncomingSmsStore(appContext, repository, preferences, markSpam = true, ownNumberResolver = ownNumberResolver),
             inboxStore = store,

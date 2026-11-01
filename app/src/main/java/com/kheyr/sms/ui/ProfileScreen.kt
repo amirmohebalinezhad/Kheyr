@@ -45,6 +45,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.kheyr.sms.BuildConfig
 import com.kheyr.sms.settings.ThemePreference
 
 @Composable
@@ -162,7 +163,7 @@ fun ProfileScreen(
                         fontWeight = FontWeight.Bold,
                     )
                     Text(
-                        text = "Version 0.1.0 · Made for calm conversations",
+                        text = "Version ${BuildConfig.VERSION_NAME} · Made for calm conversations",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )

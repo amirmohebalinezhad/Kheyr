@@ -8,8 +8,8 @@ import com.kheyr.sms.api.KheyrApiService
 import com.kheyr.sms.data.AppDatabase
 import com.kheyr.sms.data.SmsRepository
 import com.kheyr.sms.preferences.AppPreferences
-import com.kheyr.sms.receiver.DefaultSpamRuleSet
 import com.kheyr.sms.reliability.BackgroundSyncScheduler
+import com.kheyr.sms.spam.BundledSpamRuleSet
 import com.kheyr.sms.spam.SpamRuleDownloader
 import com.kheyr.sms.sync.RoomSyncQueueStore
 import com.kheyr.sms.sync.SyncDownloader
@@ -89,7 +89,7 @@ class SpamRulesWorker(appContext: Context, params: WorkerParameters) : Coroutine
         val preferences = AppPreferences(applicationContext)
         val api = KheyrApiService.create(preferences)
         val downloaded = api.fetchSpamRules() ?: return Result.success()
-        val current = preferences.loadSpamRuleSet(DefaultSpamRuleSet.rules)
+        val current = preferences.loadSpamRuleSet(BundledSpamRuleSet.load(applicationContext))
         val result = SpamRuleDownloader().validate(current, downloaded)
         if (result.accepted && result.ruleSet != null) preferences.saveSpamRuleSet(result.ruleSet)
         return Result.success()
