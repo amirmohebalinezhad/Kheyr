@@ -50,6 +50,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import com.kheyr.sms.KheyrApplication
 import com.kheyr.sms.R
@@ -278,6 +279,7 @@ fun KheyrAppShell(
     var threadSelection by remember { mutableStateOf(ThreadSelectionState()) }
     val threadListState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
     val contactsListState = rememberSaveable(saver = LazyListState.Saver) { LazyListState() }
+    val inboxSearchFocusRequester = remember { FocusRequester() }
 
     val darkTheme = isKheyrDarkTheme(themePreference)
 
@@ -725,15 +727,29 @@ fun KheyrAppShell(
 
     val showShellTopBar = screen != AppScreen.Onboarding && screen != AppScreen.Conversation && screen != AppScreen.NewMessage
 
+    // Toasts should feel like a glance, not a modal: fade out on their own while keeping the
+    // manual dismiss affordance for anything the user needs to re-read.
+    LaunchedEffect(statusMessage) {
+        if (statusMessage == null) return@LaunchedEffect
+        kotlinx.coroutines.delay(5000)
+        statusMessage = null
+    }
+
     KheyrTheme(themePreference = themePreference) {
         Scaffold(
-            snackbarHost = { SnackbarHost(snackbarHostState) },
-            containerColor = MaterialTheme.colorScheme.background,
+            snackbarHost = {
+                KheyrSnackbarHost(
+                    hostState = snackbarHostState,
+                    modifier = Modifier.padding(bottom = 92.dp),
+                )
+            },
+            containerColor = Color.Transparent,
         ) {
-            Box(Modifier.fillMaxSize()) {
+            KheyrScreenBackground {
+                Box(Modifier.fillMaxSize()) {
                 Box(Modifier.fillMaxSize()) {
                     when (screen) {
-                        AppScreen.Onboarding -> OnboardingFlow(
+                        AppScreen.Onboarding -> KheyrOnboardingFlow(
                             step = onboardingStep,
                             gate = gateState(),
                             // Sync uploads to an account, so the toggle stays unavailable until the
@@ -741,6 +757,7 @@ fun KheyrAppShell(
                             signedIn = preferences.authTokens().first != null,
                             otpPhone = otpPhone,
                             otpCode = otpCode,
+                            appDarkTheme = darkTheme,
                             onStepChange = { onboardingStep = it },
                             onOtpPhoneChange = { otpPhone = it },
                             onOtpCodeChange = { otpCode = it },
@@ -803,6 +820,10 @@ fun KheyrAppShell(
                                         onSearchChange = { contactsSearchQuery = it },
                                         onRequestPermission = { permissionLauncher.launch(requiredPermissions()) },
                                         onContactClick = { openConversationForContact(it) },
+                                        onCompose = {
+                                            newMessageQuery = ""
+                                            screen = AppScreen.NewMessage
+                                        },
                                         listState = contactsListState,
                                     )
                                     MainTab.Settings -> SettingsListScreen(
@@ -934,13 +955,44 @@ fun KheyrAppShell(
                                             }
                                         },
                                         listState = threadListState,
-                                        emptyText = when {
-                                            threadsLoading -> "Loading conversations..."
-                                            !smsPermissionGranted -> "Grant SMS access to load conversations"
-                                            chatFolder == ChatFolder.Spam -> "No spam messages"
-                                            chatFolder == ChatFolder.Archived -> "No archived conversations"
-                                            chatFolder == ChatFolder.Pinned -> "No pinned conversations"
-                                            else -> "No conversations yet"
+                                        searchFocusRequester = inboxSearchFocusRequester,
+                                        onCompose = {
+                                            newMessageQuery = ""
+                                            screen = AppScreen.NewMessage
+                                            refreshContacts()
+                                        },
+                                        showFab = snackbarHostState.currentSnackbarData == null,
+                                        emptyTitle = when {
+                                            !smsPermissionGranted -> "SMS access needed"
+                                            searchQuery.isNotBlank() -> "No results"
+                                            chatFolder == ChatFolder.Spam -> "Spam is quiet"
+                                            chatFolder == ChatFolder.Archived -> "Nothing archived"
+                                            chatFolder == ChatFolder.Pinned -> "No pinned chats"
+                                            else -> "A quiet inbox"
+                                        },
+                                        emptyMessage = when {
+                                            !smsPermissionGranted -> "Allow Kheyr to read your messages so your conversations can show up here."
+                                            searchQuery.isNotBlank() -> "No messages match “$searchQuery”."
+                                            chatFolder == ChatFolder.Spam -> "Messages that look like spam will be filed here, away from your inbox."
+                                            chatFolder == ChatFolder.Archived -> "Conversations you archive to clear your inbox will live here."
+                                            chatFolder == ChatFolder.Pinned -> "Pin the conversations you never want to lose."
+                                            else -> "Messages you send and receive will appear here, beautifully organized."
+                                        },
+                                        emptyActionLabel = when {
+                                            !smsPermissionGranted -> "Grant access"
+                                            searchQuery.isNotBlank() -> "Clear search"
+                                            chatFolder == ChatFolder.All -> "Start a conversation"
+                                            else -> "Back to inbox"
+                                        },
+                                        onEmptyAction = when {
+                                            !smsPermissionGranted -> ({ permissionLauncher.launch(requiredPermissions()) })
+                                            searchQuery.isNotBlank() -> ({ searchQuery = "" })
+                                            chatFolder == ChatFolder.All -> ({
+                                                newMessageQuery = ""
+                                                screen = AppScreen.NewMessage
+                                                refreshContacts()
+                                            })
+                                            else -> ({ chatFolder = ChatFolder.All; refreshThreadsLocal() })
                                         },
                                     )
                                     }
@@ -1164,6 +1216,7 @@ fun KheyrAppShell(
                             onSelectionClose = { threadSelection = threadSelection.clear() },
                             onSelectionAction = { threadSelectionOverflowExpanded = false; runThreadSelectionAction(it) },
                             onSelectionPin = { pinned -> threadSelectionOverflowExpanded = false; runThreadSelectionPin(pinned) },
+                            onSearchFocus = { inboxSearchFocusRequester.requestFocus() },
                         )
                     }
                 }
@@ -1180,21 +1233,25 @@ fun KheyrAppShell(
                         val header = remember(thread, messages.size, sims) {
                             screenMapper.header(thread, messages.size, sims)
                         }
-                        ConversationTopBar(
-                            thread = thread,
-                            headerSubtitle = header.subtitle,
-                            // An alphanumeric sender ("VERIFY") has nothing to dial (B-34).
-                            callEnabled = header.callEnabled,
+                        GlassTopBar(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .statusBarsPadding(),
-                            onNavigateBack = { navigateBack() },
-                            onSearchToggle = { conversationSearchActive = !conversationSearchActive },
-                            onCall = {
-                                val uri = Uri.parse("tel:${thread.address}")
-                                context.startActivity(Intent(Intent.ACTION_DIAL, uri))
-                            },
-                        )
+                        ) {
+                            ConversationTopBar(
+                                thread = thread,
+                                headerSubtitle = header.subtitle,
+                                // An alphanumeric sender ("VERIFY") has nothing to dial (B-34).
+                                callEnabled = header.callEnabled,
+                                modifier = Modifier.fillMaxWidth(),
+                                onNavigateBack = { navigateBack() },
+                                onSearchToggle = { conversationSearchActive = !conversationSearchActive },
+                                onCall = {
+                                    val uri = Uri.parse("tel:${thread.address}")
+                                    context.startActivity(Intent(Intent.ACTION_DIAL, uri))
+                                },
+                            )
+                        }
                     }
                 }
 
@@ -1221,18 +1278,25 @@ fun KheyrAppShell(
                     )
                 }
 
-                statusMessage?.let { msg ->
-                        Surface(
-                            modifier = Modifier.align(Alignment.BottomCenter).padding(16.dp),
-                            tonalElevation = 4.dp,
-                            shape = MaterialTheme.shapes.medium,
-                        ) {
-                            Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text(msg, modifier = Modifier.weight(1f))
-                                TextButton(onClick = { statusMessage = null }) { Text("Dismiss") }
-                            }
-                        }
+                AnimatedVisibility(
+                    visible = statusMessage != null,
+                    enter = fadeIn(tween(180)) + slideInVertically(tween(240)) { it / 2 },
+                    exit = fadeOut(tween(140)) + slideOutVertically(tween(200)) { it / 2 },
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(
+                            bottom = when (screen) {
+                                AppScreen.Main -> KheyrChromeInsets.bottomNav() + 6.dp
+                                AppScreen.Conversation -> 104.dp
+                                else -> 24.dp
+                            },
+                        ),
+                ) {
+                    statusMessage?.let { msg ->
+                        KheyrToast(message = msg, onDismiss = { statusMessage = null })
                     }
+                }
+            }
             }
         }
 
@@ -1256,6 +1320,7 @@ fun KheyrAppShell(
                 },
                 onAction = { action ->
                     showThreadMenu = null
+                    threadSelection = threadSelection.clear()
                     if (action == ThreadBulkAction.Delete) {
                         deleteThreadWithUndo(thread)
                     } else {
@@ -1274,6 +1339,7 @@ fun KheyrAppShell(
                 },
                 onPin = {
                     showThreadMenu = null
+                    threadSelection = threadSelection.clear()
                     val pinned = !thread.isPinned
                     val updated = ThreadListOptimisticUpdate.applyPin(threads, thread, pinned)
                     threads = if (folder == ThreadFolder.Inbox) {
@@ -1290,173 +1356,6 @@ fun KheyrAppShell(
                 },
             )
         }
-    }
-}
-
-@Composable
-private fun OnboardingFlow(
-    step: Int,
-    gate: OnboardingGateState,
-    signedIn: Boolean,
-    otpPhone: String,
-    otpCode: String,
-    onStepChange: (Int) -> Unit,
-    onOtpPhoneChange: (String) -> Unit,
-    onOtpCodeChange: (String) -> Unit,
-    onRequestDefault: () -> Unit,
-    onRequestPermissions: () -> Unit,
-    onOpenSettings: () -> Unit,
-    onSkipSync: () -> Unit,
-    onEnableSync: () -> Unit,
-    onVerifyOtp: () -> Unit,
-    onRequestOtp: () -> Unit,
-    onFinish: () -> Unit,
-) {
-    val steps = OnboardingCopy.steps
-    val stepInfo = steps.getOrElse(step) { steps.last() }
-    val scrollState = rememberScrollState()
-
-    Column(
-        Modifier
-            .fillMaxSize()
-            .safeDrawingPadding(),
-    ) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            LinearProgressIndicator(
-                progress = { (step + 1f) / steps.size },
-                modifier = Modifier.fillMaxWidth(),
-                trackColor = MaterialTheme.colorScheme.surfaceVariant,
-            )
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    stepInfo.title,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Text(
-                    "${step + 1} / ${steps.size}",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-        }
-
-        Column(
-            Modifier
-                .weight(1f)
-                .verticalScroll(scrollState)
-                .padding(horizontal = 24.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            KheyrMark(size = 96.dp)
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    stepInfo.headline,
-                    style = MaterialTheme.typography.headlineSmall,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center,
-                )
-                Text(
-                    stepInfo.body,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center,
-                )
-            }
-            Surface(
-                shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Text(
-                    stepInfo.detail,
-                    modifier = Modifier.padding(16.dp),
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
-            when (step) {
-                1 -> OnboardingStatusRow(
-                    complete = gate.isDefaultSmsApp,
-                    completeLabel = "Default SMS role granted",
-                    pendingLabel = "Kheyr is not the default SMS app yet",
-                )
-                2 -> Column(verticalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    OnboardingPermissionRow("SMS access", gate.smsPermissionGranted)
-                    OnboardingPermissionRow("Contacts", gate.contactsPermissionGranted)
-                    OnboardingPermissionRow("Notifications", gate.notificationPermissionGranted)
-                }
-                3 -> Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                    OutlinedTextField(
-                        value = otpPhone,
-                        onValueChange = onOtpPhoneChange,
-                        label = { Text("Phone (+E.164)") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                    )
-                    OutlinedTextField(
-                        value = otpCode,
-                        onValueChange = onOtpCodeChange,
-                        label = { Text("Verification code") },
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true,
-                    )
-                    Text(
-                        "Backend URL: ${ApiConfig.baseUrl}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
-
-        OnboardingBottomBar(
-            step = step,
-            gate = gate,
-            signedIn = signedIn,
-            otpCode = otpCode,
-            onStepChange = onStepChange,
-            onRequestDefault = onRequestDefault,
-            onRequestPermissions = onRequestPermissions,
-            onOpenSettings = onOpenSettings,
-            onSkipSync = onSkipSync,
-            onEnableSync = onEnableSync,
-            onVerifyOtp = onVerifyOtp,
-            onRequestOtp = onRequestOtp,
-            onFinish = onFinish,
-        )
-    }
-}
-
-@Composable
-private fun OnboardingStatusRow(complete: Boolean, completeLabel: String, pendingLabel: String) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            imageVector = if (complete) Icons.Default.CheckCircle else Icons.Default.Info,
-            contentDescription = null,
-            tint = if (complete) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Text(
-            if (complete) completeLabel else pendingLabel,
-            color = if (complete) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-        )
     }
 }
 
@@ -1477,387 +1376,51 @@ private fun AccessRecoveryBanner(
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 8.dp),
-        shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.errorContainer,
+        shape = RoundedCornerShape(22.dp),
+        color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.85f),
     ) {
-        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Text(
-                when {
-                    roleWasRemoved -> "Kheyr is no longer your default SMS app, so it can't receive or send messages."
-                    !isDefaultSms -> "Kheyr isn't your default SMS app, so it can't receive or send messages."
-                    else -> "SMS permission is missing, so conversations can't be loaded."
-                },
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onErrorContainer,
-            )
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                if (!isDefaultSms) {
-                    TextButton(onClick = onMakeDefault) { Text("Make default") }
-                }
-                if (!smsPermissionGranted) {
-                    TextButton(onClick = onGrantPermission) { Text("Grant permission") }
-                }
-                Spacer(Modifier.weight(1f))
-                TextButton(onClick = onDismiss) { Text("Dismiss") }
-            }
-        }
-    }
-}
-
-@Composable
-private fun OnboardingPermissionRow(label: String, granted: Boolean) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(label)
-        Text(
-            if (granted) "Granted" else "Needed",
-            color = if (granted) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.error,
-            style = MaterialTheme.typography.labelLarge,
-        )
-    }
-}
-
-@Composable
-private fun OnboardingBottomBar(
-    step: Int,
-    gate: OnboardingGateState,
-    signedIn: Boolean,
-    otpCode: String,
-    onStepChange: (Int) -> Unit,
-    onRequestDefault: () -> Unit,
-    onRequestPermissions: () -> Unit,
-    onOpenSettings: () -> Unit,
-    onSkipSync: () -> Unit,
-    onEnableSync: () -> Unit,
-    onVerifyOtp: () -> Unit,
-    onRequestOtp: () -> Unit,
-    onFinish: () -> Unit,
-) {
-    Surface(
-        tonalElevation = 3.dp,
-        shadowElevation = 8.dp,
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Column(
-            Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+        Row(
+            modifier = Modifier.padding(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            when (step) {
-                0 -> Button(onClick = { onStepChange(1) }, modifier = Modifier.fillMaxWidth()) {
-                    Text("Continue")
-                }
-                1 -> {
-                    if (!gate.isDefaultSmsApp) {
-                        OutlinedButton(onClick = onRequestDefault, modifier = Modifier.fillMaxWidth()) {
-                            Text("Make default SMS app")
-                        }
-                    }
-                    Button(
-                        onClick = { onStepChange(2) },
-                        enabled = gate.isDefaultSmsApp,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("Continue")
-                    }
-                }
-                2 -> {
-                    if (gate.missingRequirements.isNotEmpty()) {
-                        OutlinedButton(onClick = onRequestPermissions, modifier = Modifier.fillMaxWidth()) {
-                            Text("Grant permissions")
-                        }
-                        // After a permanent denial the runtime dialog never appears again, so the only
-                        // remaining route is app settings — without it onboarding dead-ends (B-15).
-                        TextButton(onClick = onOpenSettings, modifier = Modifier.fillMaxWidth()) {
-                            Text("Open settings")
-                        }
-                    }
-                    // Contacts and notifications are optional everywhere else in the app (the inbox,
-                    // Contacts tab and New message screen all degrade gracefully), so only SMS access
-                    // blocks Continue; the rows above still show what is missing.
-                    Button(
-                        onClick = { onStepChange(3) },
-                        enabled = gate.smsPermissionGranted,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("Continue")
-                    }
-                }
-                3 -> {
-                    OutlinedButton(onClick = onRequestOtp, modifier = Modifier.fillMaxWidth()) {
-                        Text("Send OTP")
-                    }
-                    if (otpCode.isNotBlank()) {
-                        OutlinedButton(onClick = onVerifyOtp, modifier = Modifier.fillMaxWidth()) {
-                            Text("Verify OTP")
-                        }
-                    }
-                    Button(onClick = onEnableSync, enabled = signedIn, modifier = Modifier.fillMaxWidth()) {
-                        Text("Enable sync")
-                    }
-                    if (!signedIn) {
-                        // Without an account SyncSettings.canUpload is false and the 15-minute worker
-                        // would run forever doing nothing, silently (B-03).
-                        Text(
-                            "Verify your phone number first — sync needs an account to upload to.",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    TextButton(onClick = onSkipSync, modifier = Modifier.fillMaxWidth()) {
-                        Text("Skip for now")
-                    }
-                }
-                else -> Button(onClick = onFinish, modifier = Modifier.fillMaxWidth()) {
-                    Text("Open inbox")
-                }
-            }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
-@Composable
-private fun ThreadFolderScreen(
-    threads: List<SmsThread>,
-    folder: ThreadFolder,
-    showFilters: Boolean,
-    threadListFilter: ThreadListFilter,
-    onThreadListFilterChange: (ThreadListFilter) -> Unit,
-    searchQuery: String,
-    onSearchChange: (String) -> Unit,
-    sims: List<SimCard>,
-    mapper: ThreadRowPresentationMapper,
-    loading: Boolean,
-    selectedThreadIds: Set<Long>,
-    onThreadClick: (SmsThread) -> Unit,
-    onThreadLongPress: (SmsThread) -> Unit,
-    listState: LazyListState,
-    emptyText: String,
-    banner: @Composable () -> Unit = {},
-) {
-    val topInset = KheyrChromeInsets.shellTop()
-    val bottomInset = KheyrChromeInsets.bottomNav()
-
-    Column(Modifier.fillMaxSize()) {
-        Spacer(Modifier.height(topInset))
-        banner()
-        KheyrSearchField(
-            value = searchQuery,
-            onValueChange = onSearchChange,
-            placeholder = "Search threads",
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-        )
-        if (showFilters) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                ThreadListFilter.entries.forEach { filter ->
-                    FilterChip(
-                        selected = threadListFilter == filter,
-                        onClick = { onThreadListFilterChange(filter) },
-                        label = { Text(threadListFilterLabel(filter)) },
-                    )
-                }
-            }
-        }
-        if (loading && threads.isEmpty()) {
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
-        } else if (threads.isEmpty()) {
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { Text(emptyText) }
-        } else {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.weight(1f),
-                contentPadding = PaddingValues(bottom = bottomInset),
-            ) {
-                items(threads, key = { it.id }) { thread ->
-                    // Memoize the pure presentation/date derivations so they don't recompute on every
-                    // row recomposition (e.g. toggling multi-select, which changes selectedThreadIds).
-                    val row = remember(thread, folder, sims) { mapper.map(thread, folder, sims) }
-                    val timeLabel = remember(thread.lastMessageAt) { formatMessageTime(thread.lastMessageAt) }
-                    TelegramStyleThreadRow(
-                        title = row.title,
-                        preview = row.preview,
-                        timeLabel = timeLabel,
-                        photoUri = thread.contactPhotoUri,
-                        unreadBadge = row.unreadBadge,
-                        showPinned = row.showPinned,
-                        showMuted = row.showMuted,
-                        simBadge = row.simBadge,
-                        showSpamBadge = row.showSpamBadge,
-                        onClick = { onThreadClick(thread) },
-                        onLongClick = { onThreadLongPress(thread) },
-                        selected = thread.id in selectedThreadIds,
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ConversationScreenContent(
-    screen: ConversationScreenModel,
-    sims: List<SimCard>,
-    darkTheme: Boolean,
-    searchActive: Boolean,
-    searchQuery: String,
-    onSearchQueryChange: (String) -> Unit,
-    matchingIds: List<Long>,
-    onBodyChange: (String) -> Unit,
-    onSimSelected: (Int) -> Unit,
-    onSend: () -> Unit,
-    onRetry: (Long) -> Unit,
-) {
-    val listState = rememberLazyListState()
-    val searchFocusRequester = remember { FocusRequester() }
-    val visibleMessages = if (searchActive && searchQuery.isNotBlank()) screen.messages.filter { it.id in matchingIds } else screen.messages
-    val highlightQuery = if (searchActive && searchQuery.isNotBlank()) searchQuery else null
-    val topInset = KheyrChromeInsets.shellTop()
-
-    LaunchedEffect(searchActive) {
-        if (searchActive) searchFocusRequester.requestFocus()
-    }
-
-    LaunchedEffect(screen.messages.lastOrNull()?.id, searchActive) {
-        if (!searchActive && screen.messages.isNotEmpty()) {
-            listState.scrollToItem(screen.messages.lastIndex)
-        }
-    }
-
-    LaunchedEffect(searchActive, searchQuery, matchingIds) {
-        if (searchActive && searchQuery.isNotBlank() && matchingIds.isNotEmpty()) {
-            val index = visibleMessages.indexOfFirst { it.id == matchingIds.first() }
-            if (index >= 0) listState.scrollToItem(index)
-        }
-    }
-
-    Column(Modifier.fillMaxSize()) {
-        if (searchActive) {
-            KheyrSearchField(
-                value = searchQuery,
-                onValueChange = onSearchQueryChange,
-                placeholder = "Search in conversation",
-                modifier = Modifier.padding(top = topInset, start = 8.dp, end = 8.dp, bottom = 8.dp),
-                // KheyrSearchField attaches the requester to the inner text field itself; adding a
-                // second .focusRequester for the same instance here would register it twice.
-                focusRequester = searchFocusRequester,
+            KheyrIconTile(
+                icon = Icons.Default.Warning,
+                tint = MaterialTheme.colorScheme.error,
+                size = 40.dp,
             )
-        }
-        LazyColumn(
-            state = listState,
-            modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(
-                start = 12.dp,
-                end = 12.dp,
-                top = if (searchActive) 8.dp else topInset,
-                bottom = 8.dp,
-            ),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            items(visibleMessages, key = { it.id }) { row ->
-                ConversationBubbleRow(
-                    row = row,
-                    darkTheme = darkTheme,
-                    highlight = if (row.id in matchingIds) highlightQuery else null,
-                    onRetry = { onRetry(row.id) },
+            Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text(
+                    text = "SMS access lost",
+                    style = MaterialTheme.typography.titleSmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    fontWeight = FontWeight.Bold,
                 )
-            }
-        }
-        TelegramStyleComposer(
-            body = screen.composer.body,
-            sims = sims,
-            selectedSubscriptionId = screen.composer.selectedSubscriptionId,
-            sending = screen.composer.sending,
-            error = screen.composer.error?.name,
-            onBodyChange = onBodyChange,
-            onSimSelected = onSimSelected,
-            onSend = onSend,
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding(),
-        )
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ConversationTopBar(
-    thread: SmsThread,
-    headerSubtitle: String?,
-    callEnabled: Boolean,
-    onNavigateBack: () -> Unit,
-    onSearchToggle: () -> Unit,
-    onCall: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    GlassTopBar(modifier = modifier) {
-        TopAppBar(
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    ContactAvatar(
-                        displayName = thread.displayName.ifBlank { thread.address },
-                        photoUri = thread.contactPhotoUri,
-                        size = 32.dp,
-                    )
-                    Column {
-                        Text(thread.displayName.ifBlank { thread.address })
-                        headerSubtitle?.let { Text(it, style = MaterialTheme.typography.labelSmall) }
+                Text(
+                    text = when {
+                        roleWasRemoved -> "Kheyr is no longer your default SMS app, so it can't receive or send messages."
+                        !isDefaultSms -> "Kheyr isn't your default SMS app, so it can't receive or send messages."
+                        else -> "SMS permission is missing, so conversations can't be loaded."
+                    },
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.85f),
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (!isDefaultSms) {
+                        TextButton(onClick = onMakeDefault, contentPadding = PaddingValues(end = 12.dp)) {
+                            Text("Make default", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                        }
                     }
-                }
-            },
-            navigationIcon = {
-                IconButton(onClick = onNavigateBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
-            },
-            actions = {
-                IconButton(onClick = onSearchToggle) { Icon(Icons.Default.Search, "Search") }
-                if (callEnabled) {
-                    IconButton(onClick = onCall) { Icon(Icons.Default.Call, "Call") }
-                }
-            },
-            colors = TopAppBarDefaults.topAppBarColors(
-                containerColor = androidx.compose.ui.graphics.Color.Transparent,
-            ),
-        )
-    }
-}
-
-@Composable
-private fun SettingsListScreen(onCategoryClick: (SettingsCategory) -> Unit) {
-    val topInset = KheyrChromeInsets.shellTop()
-    val bottomInset = KheyrChromeInsets.bottomNav()
-    val grouped = SettingsCategoryOrder.ordered.groupBy { category ->
-        when (category) {
-            SettingsCategory.Notifications, SettingsCategory.UnknownSenders -> "Notifications"
-            SettingsCategory.SpamProtection -> "Privacy"
-            SettingsCategory.DualSim -> "Messaging"
-            SettingsCategory.Sync, SettingsCategory.DesktopDevices -> "Cloud"
-            SettingsCategory.PrivacySecurity -> "Security"
-            SettingsCategory.Appearance, SettingsCategory.About -> "General"
-        }
-    }
-    LazyColumn(
-        contentPadding = PaddingValues(top = topInset, bottom = bottomInset),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        grouped.forEach { (sectionTitle, categories) ->
-            item(key = sectionTitle) {
-                SettingsSection(title = sectionTitle) {
-                    categories.forEach { category ->
-                        SettingsRow(
-                            title = category.name.replace(Regex("([a-z])([A-Z])"), "$1 $2"),
-                            subtitle = settingsCategoryDescription(category),
-                            onClick = { onCategoryClick(category) },
+                    if (!smsPermissionGranted) {
+                        TextButton(onClick = onGrantPermission, contentPadding = PaddingValues(end = 12.dp)) {
+                            Text("Grant permission", style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.Bold)
+                        }
+                    }
+                    Spacer(Modifier.weight(1f))
+                    TextButton(onClick = onDismiss) {
+                        Text(
+                            "Dismiss",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onErrorContainer.copy(alpha = 0.7f),
                         )
                     }
                 }
@@ -1866,204 +1429,6 @@ private fun SettingsListScreen(onCategoryClick: (SettingsCategory) -> Unit) {
     }
 }
 
-private fun settingsCategoryDescription(category: SettingsCategory): String = when (category) {
-    SettingsCategory.Notifications -> "Ringtone, vibration, and content privacy"
-    SettingsCategory.UnknownSenders -> "Alerts from numbers not in contacts"
-    SettingsCategory.SpamProtection -> "Global spam rules and thresholds"
-    SettingsCategory.DualSim -> "Default SIM for outgoing SMS"
-    SettingsCategory.Sync -> "Encrypted cloud sync and status"
-    SettingsCategory.DesktopDevices -> "Paired desktop clients"
-    SettingsCategory.PrivacySecurity -> "Cloud delete, export, and encryption"
-    SettingsCategory.Appearance -> "Light, dark, or system theme"
-    SettingsCategory.About -> "Version and legal links"
-}
-
-@Composable
-private fun SettingsDetailScreen(
-    category: SettingsCategory,
-    notificationSettings: NotificationSettings,
-    themePreference: ThemePreference,
-    syncEnabled: Boolean,
-    signedIn: Boolean,
-    defaultSub: Int?,
-    sims: List<SimCard>,
-    directMessagesEnabled: Boolean,
-    spamAutoDeleteDays: Int,
-    onNotificationChange: (NotificationSettings) -> Unit,
-    onThemeChange: (ThemePreference) -> Unit,
-    onSyncChange: (Boolean) -> Unit,
-    onDefaultSimChange: (Int?) -> Unit,
-    onDirectMessagesChange: (Boolean) -> Unit,
-    onSpamAutoDeleteChange: (Int) -> Unit,
-    onDeleteCloudData: () -> Unit,
-    onExportCloudData: () -> Unit,
-) {
-    val topInset = KheyrChromeInsets.shellTop()
-    val context = LocalContext.current
-    Column(Modifier.fillMaxSize().padding(top = topInset, start = 16.dp, end = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        when (category) {
-            SettingsCategory.Notifications -> {
-                NotificationContentMode.entries.forEach { mode ->
-                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text(mode.name.replace('_', ' ').lowercase().replaceFirstChar { it.uppercase() })
-                        RadioButton(selected = notificationSettings.contentMode == mode, onClick = { onNotificationChange(notificationSettings.copy(contentMode = mode)) })
-                    }
-                }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Vibrate"); Switch(checked = notificationSettings.vibrate, onCheckedChange = { onNotificationChange(notificationSettings.copy(vibrate = it)) })
-                }
-            }
-            SettingsCategory.UnknownSenders -> UnknownSenderNotificationMode.entries.forEach { mode ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(mode.name); RadioButton(selected = notificationSettings.unknownSenderMode == mode, onClick = { onNotificationChange(notificationSettings.copy(unknownSenderMode = mode)) })
-                }
-            }
-            SettingsCategory.SpamProtection -> {
-                Text("Spam rules are downloaded from the server. Cached rules are used offline.")
-                Text("Auto-delete spam after (days, 0=never): $spamAutoDeleteDays")
-                // steps is the count of points BETWEEN the ends, so 29 yields 31 integer ticks
-                // (0..30 at spacing 1.0); roundToInt avoids the truncation bias of toInt().
-                Slider(value = spamAutoDeleteDays.toFloat(), onValueChange = { onSpamAutoDeleteChange(it.roundToInt()) }, valueRange = 0f..30f, steps = 29)
-            }
-            SettingsCategory.DualSim -> sims.forEach { sim ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(sim.displayName); RadioButton(selected = defaultSub == sim.subscriptionId, onClick = { onDefaultSimChange(sim.subscriptionId) })
-                }
-            }
-            SettingsCategory.Sync -> {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Enable sync")
-                    Switch(checked = syncEnabled && signedIn, enabled = signedIn, onCheckedChange = onSyncChange)
-                }
-                if (!signedIn) {
-                    Text(
-                        "Sync is unavailable until you sign in: without an account there is nowhere to upload to.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
-                Text("API: ${ApiConfig.baseUrl}", style = MaterialTheme.typography.labelSmall)
-            }
-            SettingsCategory.DesktopDevices -> Text("Manage paired desktop devices from the Chats overflow menu.")
-            SettingsCategory.PrivacySecurity -> {
-                Button(onClick = onDeleteCloudData, modifier = Modifier.fillMaxWidth()) { Text("Delete cloud data") }
-                OutlinedButton(onClick = onExportCloudData, modifier = Modifier.fillMaxWidth()) { Text("Export cloud data") }
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text("Direct messages"); Switch(checked = directMessagesEnabled, onCheckedChange = onDirectMessagesChange) }
-            }
-            SettingsCategory.Appearance -> ThemePreference.entries.forEach { pref ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) { Text(pref.name); RadioButton(selected = themePreference == pref, onClick = { onThemeChange(pref) }) }
-            }
-            SettingsCategory.About -> {
-                KheyrBrandHeader(subtitle = "Version 0.1.0")
-                Text("Modern SMS with spam filtering, sync, and desktop relay.", style = MaterialTheme.typography.bodyMedium)
-                TextButton(onClick = {
-                    context.safeStartActivity(Intent(Intent.ACTION_VIEW, Uri.parse(PRIVACY_POLICY_URL)))
-                }) { Text("Privacy policy") }
-            }
-        }
-    }
-}
-
-@Composable
-private fun DesktopSyncScreen(api: KheyrApiService, onStatus: (String) -> Unit) {
-    val topInset = KheyrChromeInsets.shellTop()
-    val scope = rememberCoroutineScope()
-    var devices by remember { mutableStateOf<List<RemoteDevice>>(emptyList()) }
-    var loading by remember { mutableStateOf(false) }
-
-    fun refresh() {
-        if (!ApiConfig.isConfigured) return
-        loading = true
-        scope.launch(Dispatchers.IO) {
-            val result = api.listDevices().filter { it.isDesktop }
-            withContext(Dispatchers.Main) { devices = result; loading = false }
-        }
-    }
-
-    val scanLauncher = rememberLauncherForActivityResult(ScanContract()) { result ->
-        val raw = result.contents
-        if (raw == null) {
-            onStatus("Pairing cancelled")
-            return@rememberLauncherForActivityResult
-        }
-        when (val parsed = PairingQrValidator.validate(PairingQrCodec.parse(raw), System.currentTimeMillis() / 1000)) {
-            is PairingQrResult.Invalid -> onStatus(parsed.reason)
-            is PairingQrResult.Valid -> scope.launch(Dispatchers.IO) {
-                val ok = api.approvePairing(parsed.sessionId, "Desktop") != null
-                withContext(Dispatchers.Main) {
-                    onStatus(if (ok) "Desktop paired" else "Pairing failed — check connection")
-                    if (ok) refresh()
-                }
-            }
-        }
-    }
-
-    LaunchedEffect(Unit) { refresh() }
-
-    Column(Modifier.fillMaxSize().padding(top = topInset, start = 24.dp, end = 24.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Pair a desktop", style = MaterialTheme.typography.titleMedium)
-        Text(
-            "Scan the QR code shown on the Kheyr desktop app to let it read and send SMS through this phone.",
-            style = MaterialTheme.typography.bodyMedium,
-        )
-        Button(
-            onClick = {
-                if (!ApiConfig.isConfigured) {
-                    onStatus("Configure the backend URL first")
-                    return@Button
-                }
-                scanLauncher.launch(ScanOptions().setOrientationLocked(false).setBeepEnabled(false).setPrompt("Scan the desktop pairing QR"))
-            },
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("Scan pairing QR") }
-
-        Text("Paired desktops", style = MaterialTheme.typography.titleSmall)
-        when {
-            !ApiConfig.isConfigured -> Text("Configure the backend URL to manage paired devices.", style = MaterialTheme.typography.bodySmall)
-            loading && devices.isEmpty() -> Text("Loading…", style = MaterialTheme.typography.bodySmall)
-            devices.isEmpty() -> Text("No desktops paired yet.", style = MaterialTheme.typography.bodySmall)
-            else -> devices.forEach { device ->
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                    Column(Modifier.weight(1f)) {
-                        Text(device.name.ifBlank { "Desktop" }, style = MaterialTheme.typography.bodyLarge)
-                        Text(device.platform, style = MaterialTheme.typography.labelSmall)
-                    }
-                    OutlinedButton(onClick = {
-                        scope.launch(Dispatchers.IO) {
-                            val ok = api.revokeDevice(device.id)
-                            withContext(Dispatchers.Main) {
-                                onStatus(if (ok) "Device revoked" else "Revoke failed")
-                                if (ok) refresh()
-                            }
-                        }
-                    }) { Text("Revoke") }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun HelpScreen() {
-    val topInset = KheyrChromeInsets.shellTop()
-    val context = LocalContext.current
-    val help = HelpFeedbackModel(helpUrl = "https://kheyr.app/help", supportEmail = "support@kheyr.app")
-    Column(Modifier.padding(top = topInset, start = 24.dp, end = 24.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text("Help & Feedback", style = MaterialTheme.typography.titleMedium)
-        Button(
-            onClick = { context.safeStartActivity(Intent(Intent.ACTION_VIEW, Uri.parse(help.helpUrl))) },
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("Open help center") }
-        OutlinedButton(
-            onClick = { context.safeStartActivity(Intent(Intent.ACTION_SENDTO, Uri.parse("mailto:${help.supportEmail}"))) },
-            modifier = Modifier.fillMaxWidth(),
-        ) { Text("Email support") }
-        Text("Help center: ${help.helpUrl}", style = MaterialTheme.typography.labelSmall)
-        Text("Email: ${help.supportEmail}", style = MaterialTheme.typography.labelSmall)
-    }
-}
-
-private const val PRIVACY_POLICY_URL = "https://kheyr.app/privacy"
 
 /**
  * Clears the signed-in sync state locally (tokens, phone, sync device, backfill flag).
@@ -2084,237 +1449,8 @@ private fun clearLocalSession(context: android.content.Context, preferences: App
 }
 
 /** Launches an intent, ignoring the case where no app can handle it (avoids ActivityNotFoundException crashes). */
-private fun android.content.Context.safeStartActivity(intent: Intent) {
+internal fun android.content.Context.safeStartActivity(intent: Intent) {
     runCatching { startActivity(intent) }
-}
-
-
-@Composable
-private fun NewMessageScreen(
-    contacts: List<DeviceContact>,
-    loading: Boolean,
-    hasPermission: Boolean,
-    query: String,
-    onQueryChange: (String) -> Unit,
-    onRequestPermission: () -> Unit,
-    onRecipientSelected: (NewMessageRecipient) -> Unit,
-    onNavigateBack: () -> Unit,
-) {
-    val topInset = KheyrChromeInsets.shellTop()
-    val model = remember(contacts) { NewMessageViewModel(contacts) }
-    val state = remember(model, query) { model.stateFor(query) }
-
-    Column(Modifier.fillMaxSize().padding(top = topInset)) {
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = onNavigateBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
-            Text("New message", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-        }
-        KheyrSearchField(
-            value = query,
-            onValueChange = onQueryChange,
-            placeholder = "Name or phone number",
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-        )
-        if (!hasPermission) {
-            Text(
-                "Grant contacts access to search your address book, or type a phone number to continue.",
-                modifier = Modifier.padding(horizontal = 16.dp),
-                style = MaterialTheme.typography.bodyMedium,
-            )
-            TextButton(onClick = onRequestPermission, modifier = Modifier.padding(horizontal = 8.dp)) { Text("Grant contacts access") }
-        }
-        state.manualAddress?.let { address ->
-            ListItem(
-                headlineContent = { Text("Send to $address") },
-                supportingContent = { Text("Use typed phone number") },
-                leadingContent = { Icon(Icons.Default.Send, contentDescription = null) },
-                modifier = Modifier.clickable { model.manualRecipient(query)?.let(onRecipientSelected) },
-            )
-        }
-        if (loading && contacts.isEmpty()) {
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
-        } else if (state.matches.isEmpty()) {
-            Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                Text(if (query.isBlank()) "Type a name or phone number" else "No matching contacts")
-            }
-        } else {
-            LazyColumn(modifier = Modifier.weight(1f), contentPadding = PaddingValues(bottom = KheyrChromeInsets.bottomNav())) {
-                items(state.matches, key = { "${it.id}:${it.phoneNumber}" }) { contact ->
-                    TelegramStyleContactRow(
-                        displayName = contact.displayName,
-                        phoneNumber = contact.phoneNumber,
-                        photoUri = contact.photoUri,
-                        onClick = { onRecipientSelected(model.recipientFor(contact)) },
-                    )
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ContactsScreen(
-    contacts: List<DeviceContact>,
-    loading: Boolean,
-    hasPermission: Boolean,
-    searchQuery: String,
-    onSearchChange: (String) -> Unit,
-    onRequestPermission: () -> Unit,
-    onContactClick: (DeviceContact) -> Unit,
-    listState: LazyListState,
-) {
-    val topInset = KheyrChromeInsets.shellTop()
-    val bottomInset = KheyrChromeInsets.bottomNav()
-    val filteredContacts = remember(contacts, searchQuery) {
-        val query = searchQuery.trim()
-        if (query.isBlank()) {
-            contacts
-        } else {
-            contacts.filter { contact ->
-                contact.displayName.contains(query, ignoreCase = true) ||
-                    contact.phoneNumber.contains(query, ignoreCase = true)
-            }
-        }
-    }
-
-    when {
-        !hasPermission -> {
-            Column(
-                Modifier.fillMaxSize().padding(top = topInset, start = 24.dp, end = 24.dp, bottom = 24.dp),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text("Contacts permission is required to show your address book.")
-                Spacer(Modifier.height(16.dp))
-                Button(onClick = onRequestPermission) { Text("Grant contacts access") }
-            }
-        }
-        loading && contacts.isEmpty() -> {
-            Box(Modifier.fillMaxSize().padding(top = topInset), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator()
-            }
-        }
-        contacts.isEmpty() -> {
-            Box(Modifier.fillMaxSize().padding(top = topInset), contentAlignment = Alignment.Center) {
-                Text("No contacts with phone numbers found.")
-            }
-        }
-        else -> {
-            Column(Modifier.fillMaxSize()) {
-                Spacer(Modifier.height(topInset))
-                KheyrSearchField(
-                    value = searchQuery,
-                    onValueChange = onSearchChange,
-                    placeholder = "Search contacts",
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
-                )
-                if (filteredContacts.isEmpty()) {
-                    Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                        Text("No contacts match your search")
-                    }
-                } else {
-                    LazyColumn(
-                        state = listState,
-                        modifier = Modifier.weight(1f),
-                        contentPadding = PaddingValues(bottom = bottomInset),
-                    ) {
-                        items(filteredContacts, key = { "${it.id}:${it.phoneNumber}" }) { contact ->
-                            TelegramStyleContactRow(
-                                displayName = contact.displayName,
-                                phoneNumber = contact.phoneNumber,
-                                photoUri = contact.photoUri,
-                                onClick = { onContactClick(contact) },
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun ThreadActionDialog(
-    thread: SmsThread,
-    blocked: Boolean,
-    onDismiss: () -> Unit,
-    onToggleBlock: () -> Unit,
-    onAction: (ThreadBulkAction) -> Unit,
-    onPin: () -> Unit,
-) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(thread.displayName.ifBlank { thread.address }) },
-        text = {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalAlignment = Alignment.Start,
-            ) {
-                ThreadActionMenuItem(
-                    icon = Icons.Default.Star,
-                    label = if (thread.isPinned) "Unpin" else "Pin",
-                    onClick = onPin,
-                )
-                ThreadActionMenuItem(
-                    icon = Icons.Default.Check,
-                    label = "Mark read",
-                    onClick = { onAction(ThreadBulkAction.MarkRead) },
-                )
-                ThreadActionMenuItem(
-                    icon = Icons.Default.List,
-                    label = if (thread.isArchived) "Unarchive" else "Archive",
-                    onClick = { onAction(ThreadBulkAction.Archive) },
-                )
-                ThreadActionMenuItem(
-                    icon = Icons.Default.Warning,
-                    label = if (thread.isSpam) "Not spam" else "Mark spam",
-                    onClick = { onAction(ThreadBulkAction.MarkSpam) },
-                )
-                ThreadActionMenuItem(
-                    icon = Icons.Default.Notifications,
-                    label = if (thread.isMuted) "Unmute" else "Mute",
-                    onClick = { onAction(ThreadBulkAction.Mute) },
-                )
-                ThreadActionMenuItem(
-                    icon = Icons.Default.Lock,
-                    label = if (blocked) "Unblock sender" else "Block sender",
-                    onClick = onToggleBlock,
-                )
-                ThreadActionMenuItem(
-                    icon = Icons.Default.Delete,
-                    label = "Delete messages",
-                    onClick = { onAction(ThreadBulkAction.Delete) },
-                )
-            }
-        },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close") } },
-    )
-}
-
-@Composable
-private fun ThreadActionMenuItem(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    onClick: () -> Unit,
-) {
-    TextButton(
-        onClick = onClick,
-        modifier = Modifier.fillMaxWidth(),
-        contentPadding = PaddingValues(horizontal = 0.dp, vertical = 4.dp),
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.Start,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp))
-            Spacer(Modifier.width(12.dp))
-            Text(label)
-        }
-    }
 }
 
 private fun requiredPermissions(): Array<String> = buildList {
@@ -2323,9 +1459,9 @@ private fun requiredPermissions(): Array<String> = buildList {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
 }.toTypedArray()
 
-private fun formatMessageTime(instant: Instant): String = JalaliDateFormatter.format(instant)
+internal fun formatMessageTime(instant: Instant): String = JalaliDateFormatter.format(instant)
 
-private fun threadListFilterLabel(filter: ThreadListFilter): String = when (filter) {
+internal fun threadListFilterLabel(filter: ThreadListFilter): String = when (filter) {
     ThreadListFilter.All -> "All"
     ThreadListFilter.Unread -> "Unread"
     ThreadListFilter.Contacts -> "Contacts"
@@ -2353,77 +1489,203 @@ private fun ShellTopAppBar(
     onSelectionClose: () -> Unit,
     onSelectionAction: (ThreadBulkAction) -> Unit,
     onSelectionPin: (Boolean) -> Unit,
+    onSearchFocus: () -> Unit,
 ) {
-    TopAppBar(
-        title = {
-            if (selectedCount > 0) {
-                Text("$selectedCount selected")
-            } else Text(
-                when (screen) {
-                    AppScreen.SettingsDetail -> settingsCategory?.name?.replace(Regex("([a-z])([A-Z])"), "$1 $2") ?: "Settings"
-                    AppScreen.DesktopSync -> "Desktop Sync"
-                    AppScreen.Help -> "Help & Feedback"
-                    AppScreen.Main -> when (selectedTab) {
-                        MainTab.Chats -> chatFolder.title
-                        MainTab.Contacts -> "Contacts"
-                        MainTab.Settings -> "Settings"
-                        MainTab.Profile -> "Profile"
-                    }
-                    else -> "Kheyr"
-                },
-            )
-        },
-        navigationIcon = {
-            when (screen) {
-                AppScreen.SettingsDetail -> IconButton(onClick = onSettingsBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
+    val selectionMode = selectedCount > 0
+    val title = when {
+        selectionMode -> "$selectedCount selected"
+        screen == AppScreen.SettingsDetail -> settingsCategory?.let { settingsDisplayTitle(it) } ?: "Settings"
+        screen == AppScreen.DesktopSync -> "Desktop sync"
+        screen == AppScreen.Help -> "Help & feedback"
+        screen == AppScreen.Main -> when (selectedTab) {
+            MainTab.Chats -> "Kheyr"
+            MainTab.Contacts -> "Contacts"
+            MainTab.Settings -> "Settings"
+            MainTab.Profile -> "Profile"
+        }
+        else -> "Kheyr"
+    }
+    val subtitle = when {
+        selectionMode -> "Tap to add more"
+        screen == AppScreen.SettingsDetail -> "Settings"
+        screen == AppScreen.DesktopSync -> "Link a computer"
+        screen == AppScreen.Help -> "We read every message"
+        screen == AppScreen.Main -> when (selectedTab) {
+            MainTab.Chats -> chatFolder.title
+            MainTab.Contacts -> "Your address book"
+            MainTab.Settings -> "Private by default"
+            MainTab.Profile -> "Your account"
+        }
+        else -> null
+    }
+
+    KheyrTopBar(
+        title = title,
+        subtitle = subtitle,
+        leading = when {
+            selectionMode -> {
+                {
+                    KheyrIconButton(
+                        icon = Icons.Default.Close,
+                        contentDescription = "Clear selection",
+                        onClick = onSelectionClose,
+                    )
                 }
-                AppScreen.DesktopSync, AppScreen.Help -> IconButton(onClick = onNavigateBack) {
-                    Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back")
-                }
-                else -> if (selectedCount > 0) IconButton(onClick = onSelectionClose) { Icon(Icons.Default.Close, "Clear selection") }
             }
+            screen == AppScreen.SettingsDetail -> {
+                {
+                    KheyrIconButton(
+                        icon = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        onClick = onSettingsBack,
+                    )
+                }
+            }
+            screen == AppScreen.DesktopSync || screen == AppScreen.Help -> {
+                {
+                    KheyrIconButton(
+                        icon = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        onClick = onNavigateBack,
+                    )
+                }
+            }
+            screen == AppScreen.Main && selectedTab == MainTab.Chats -> {
+                { KheyrMark(size = 34.dp) }
+            }
+            screen == AppScreen.Main -> {
+                {
+                    KheyrIconTile(
+                        icon = when (selectedTab) {
+                            MainTab.Chats -> KheyrIcons.Chat
+                            MainTab.Contacts -> KheyrIcons.Contacts
+                            MainTab.Settings -> Icons.Default.Settings
+                            MainTab.Profile -> KheyrIcons.Profile
+                        },
+                        size = 38.dp,
+                    )
+                }
+            }
+            else -> null
         },
         actions = {
-            if (selectedCount > 0) {
-                IconButton(onClick = { onSelectionAction(ThreadBulkAction.MarkSpam) }) { Icon(Icons.Default.Warning, "Mark spam") }
-                IconButton(onClick = { onSelectionAction(ThreadBulkAction.Archive) }) { Icon(Icons.Default.List, "Archive") }
-                IconButton(onClick = { onSelectionAction(ThreadBulkAction.Delete) }) { Icon(Icons.Default.Delete, "Delete") }
+            if (selectionMode) {
+                KheyrIconButton(
+                    icon = Icons.Default.Check,
+                    contentDescription = "Mark read",
+                    onClick = { onSelectionAction(ThreadBulkAction.MarkRead) },
+                )
+                KheyrIconButton(
+                    icon = KheyrIcons.Archive,
+                    contentDescription = "Archive",
+                    onClick = { onSelectionAction(ThreadBulkAction.Archive) },
+                )
+                KheyrIconButton(
+                    icon = Icons.Default.Delete,
+                    contentDescription = "Delete",
+                    onClick = { onSelectionAction(ThreadBulkAction.Delete) },
+                    tint = MaterialTheme.colorScheme.error,
+                )
                 Box {
-                    IconButton(onClick = onSelectionOverflowExpand) { Icon(Icons.Default.MoreVert, "More selection actions") }
-                    DropdownMenu(expanded = selectionOverflowExpanded, onDismissRequest = onSelectionOverflowDismiss) {
-                        DropdownMenuItem(text = { Text(selectionPinLabel) }, onClick = { onSelectionPin(selectionPinLabel == "Pin") })
-                        DropdownMenuItem(text = { Text("Mark read") }, onClick = { onSelectionAction(ThreadBulkAction.MarkRead) })
-                        DropdownMenuItem(text = { Text("Mute") }, onClick = { onSelectionAction(ThreadBulkAction.Mute) })
+                    KheyrIconButton(
+                        icon = Icons.Default.MoreVert,
+                        contentDescription = "More selection actions",
+                        onClick = onSelectionOverflowExpand,
+                    )
+                    KheyrDropdownMenu(
+                        expanded = selectionOverflowExpanded,
+                        onDismissRequest = onSelectionOverflowDismiss,
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text(selectionPinLabel) },
+                            leadingIcon = { Icon(KheyrIcons.Pin, contentDescription = null) },
+                            onClick = { onSelectionPin(selectionPinLabel == "Pin") },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Mark read") },
+                            leadingIcon = { Icon(Icons.Default.Check, contentDescription = null) },
+                            onClick = { onSelectionAction(ThreadBulkAction.MarkRead) },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Mark spam") },
+                            leadingIcon = { Icon(Icons.Default.Warning, contentDescription = null) },
+                            onClick = { onSelectionAction(ThreadBulkAction.MarkSpam) },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Mute") },
+                            leadingIcon = { Icon(KheyrIcons.Mute, contentDescription = null) },
+                            onClick = { onSelectionAction(ThreadBulkAction.Mute) },
+                        )
                     }
                 }
             } else if (screen == AppScreen.Main && selectedTab == MainTab.Chats) {
+                KheyrIconButton(
+                    icon = Icons.Default.Search,
+                    contentDescription = "Search conversations",
+                    onClick = onSearchFocus,
+                )
                 Box {
-                    IconButton(onClick = onChatsOverflowExpand) {
-                        Icon(Icons.Default.MoreVert, "Menu")
-                    }
-                    DropdownMenu(
+                    KheyrIconButton(
+                        icon = Icons.Default.MoreVert,
+                        contentDescription = "Menu",
+                        onClick = onChatsOverflowExpand,
+                    )
+                    KheyrDropdownMenu(
                         expanded = chatsOverflowExpanded,
                         onDismissRequest = onChatsOverflowDismiss,
                     ) {
+                        Text(
+                            text = "FOLDERS",
+                            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 4.dp),
+                            style = MaterialTheme.typography.labelSmall.copy(letterSpacing = 1.2.sp),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                         MainNavigationModel.chatFolders().forEach { folder ->
                             DropdownMenuItem(
                                 text = { Text(folder.title) },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = when (folder) {
+                                            ChatFolder.All -> KheyrIcons.Chat
+                                            ChatFolder.Spam -> Icons.Default.Warning
+                                            ChatFolder.Archived -> KheyrIcons.Archive
+                                            ChatFolder.Pinned -> KheyrIcons.Pin
+                                        },
+                                        contentDescription = null,
+                                    )
+                                },
+                                trailingIcon = {
+                                    if (chatFolder == folder) {
+                                        Icon(
+                                            Icons.Default.Check,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                        )
+                                    }
+                                },
                                 onClick = {
                                     onChatsOverflowDismiss()
                                     onChatFolderSelected(folder)
                                 },
-                                leadingIcon = {
-                                    if (chatFolder == folder) {
-                                        Icon(Icons.Default.Check, contentDescription = null)
-                                    }
-                                },
                             )
                         }
-                        HorizontalDivider()
+                        HorizontalDivider(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                        )
                         MainNavigationModel.overflowActions().forEach { action ->
                             DropdownMenuItem(
                                 text = { Text(action.title) },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = when (action) {
+                                            ChatsOverflowAction.DesktopSync -> KheyrIcons.Monitor
+                                            ChatsOverflowAction.HelpFeedback -> KheyrIcons.Help
+                                            ChatsOverflowAction.Compose -> KheyrIcons.Compose
+                                        },
+                                        contentDescription = null,
+                                    )
+                                },
                                 onClick = {
                                     onChatsOverflowDismiss()
                                     onOverflowAction(action)
@@ -2434,8 +1696,23 @@ private fun ShellTopAppBar(
                 }
             }
         },
-        colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = Color.Transparent,
-        ),
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun KheyrDropdownMenu(
+    expanded: Boolean,
+    onDismissRequest: () -> Unit,
+    content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit,
+) {
+    DropdownMenu(
+        expanded = expanded,
+        onDismissRequest = onDismissRequest,
+        shape = RoundedCornerShape(22.dp),
+        containerColor = MaterialTheme.colorScheme.surface,
+        tonalElevation = 0.dp,
+        shadowElevation = 12.dp,
+        content = content,
     )
 }

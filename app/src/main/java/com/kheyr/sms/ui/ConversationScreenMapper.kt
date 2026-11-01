@@ -7,6 +7,7 @@ import com.kheyr.sms.util.OtpDetector
 import com.kheyr.sms.data.SmsMessage
 import com.kheyr.sms.data.SmsThread
 import com.kheyr.sms.telephony.SimCard
+import java.time.Instant
 
 data class ConversationMessageRow(
     val id: Long,
@@ -15,6 +16,9 @@ data class ConversationMessageRow(
     val timeLabel: String,
     val showRetry: Boolean,
     val copyableCode: String?,
+    val timestamp: Instant = Instant.EPOCH,
+    val direction: MessageDirection = MessageDirection.Incoming,
+    val status: MessageStatus = MessageStatus.Received,
 )
 
 data class ConversationScreenModel(
@@ -58,5 +62,8 @@ class ConversationScreenMapper(
         } else {
             null
         },
+        timestamp = message.timestamp,
+        direction = message.direction,
+        status = message.status,
     )
 }
