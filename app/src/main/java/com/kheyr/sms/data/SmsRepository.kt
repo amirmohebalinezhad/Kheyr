@@ -73,6 +73,8 @@ class SmsRepository(
         telephonyId: Long? = null,
         read: Boolean = false,
         simSlot: Int? = null,
+        categoryId: String? = null,
+        spamScore: Int = 0,
     ): Long {
         val message = SmsMessageEntity(
             telephonyId = telephonyId,
@@ -84,6 +86,8 @@ class SmsRepository(
             status = MessageStatus.Received,
             read = read,
             simSlot = simSlot,
+            categoryId = categoryId,
+            spamScore = spamScore,
         )
         val id = smsDao.insertIncomingSms(message)
         enqueueMessageChange(message.copy(id = id))

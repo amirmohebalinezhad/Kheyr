@@ -229,7 +229,18 @@ public class SpamRuleService(KheyrDbContext db)
         => JsonSerializer.Deserialize<List<SpamRuleDto>>(rulesJson) ?? [];
 }
 
-public record SpamRuleDto(string Id, string Type, string? Pattern, int Score, bool Enabled = true);
+/// <summary>
+/// A published spam rule. <paramref name="Category"/> and <paramref name="CategoryScore"/> carry the
+/// classification axis, which is independent of <paramref name="Score"/>: a bank SMS is category
+/// financial with high confidence and a strongly negative spam score.
+///
+/// <paramref name="CategoryScore"/> is nullable so that "absent" stays distinguishable from zero
+/// through the publish/parse round trip - the device treats an absent value as |Score|, never as 0,
+/// which is what keeps a multi-category message from resolving on arbitrary rule order.
+///
+/// Both members are optional so that rule packs published before this shipped still bind.
+/// </summary>
+public record SpamRuleDto(string Id, string Type, string? Pattern, int Score, bool Enabled = true, string? Category = null, int? CategoryScore = null);
 
 public class SyncService(KheyrDbContext db)
 {

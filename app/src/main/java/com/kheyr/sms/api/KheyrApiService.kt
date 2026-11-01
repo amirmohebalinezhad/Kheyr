@@ -276,7 +276,8 @@ class KheyrApiService(
      * non-integer `score`) is skipped instead of throwing out of SpamRulesWorker.doWork(). Returns
      * null when the payload is unusable, so a rule set that yields zero rules is rejected, never applied.
      */
-    private fun parseSpamRuleSet(json: JSONObject): SpamRuleSet? {
+    /** Internal rather than private so the wire contract can be tested without a network call. */
+    internal fun parseSpamRuleSet(json: JSONObject): SpamRuleSet? {
         val version = json.optInt("version", INVALID_VERSION)
         if (version == INVALID_VERSION) {
             Log.w(TAG, "Spam rule set rejected: missing or non-integer version")
@@ -315,6 +316,11 @@ class KheyrApiService(
                 pattern = json.optString("pattern").takeIf { it.isNotBlank() },
                 score = json.getInt("score"),
                 enabled = json.optBoolean("enabled", true),
+                // The server serializes absent members as explicit nulls, and optString() renders a
+                // JSON null as the string "null", so the null check has to come first.
+                category = if (json.isNull("category")) null else json.optString("category").takeIf { it.isNotBlank() },
+                // Absent means "use |score|"; SpamRule.categoryWeight makes that substitution.
+                categoryScore = if (json.isNull("category_score")) 0 else json.optInt("category_score", 0),
             )
         }.getOrNull()
     }
