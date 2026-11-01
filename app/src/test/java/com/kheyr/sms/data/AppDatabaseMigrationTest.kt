@@ -13,9 +13,12 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 
 /**
- * A real v2 store, created from the committed 2.json schema, must survive MIGRATION_2_3 with its
- * rows intact and pick up userNotSpam = 0. Room re-validates the schema on open, so this also
- * proves the migrated table matches what the v3 entity expects.
+ * A real v2 store, created from the committed 2.json schema, must survive the migration chain with
+ * its rows intact and pick up userNotSpam = 0. Room re-validates the schema on open, so this also
+ * proves the migrated tables match what the current entities expect.
+ *
+ * The chain runs to the latest version, not just to v3: an install that skipped a release upgrades
+ * across several versions in one launch, and that is the path least likely to be exercised by hand.
  */
 @RunWith(RobolectricTestRunner::class)
 class AppDatabaseMigrationTest {
@@ -31,7 +34,7 @@ class AppDatabaseMigrationTest {
         context.deleteDatabase(name)
     }
 
-    @Test fun migratesV2StoreToV3PreservingRows() {
+    @Test fun migratesV2StoreThroughToTheCurrentVersionPreservingRows() {
         val path = context.getDatabasePath(name).also { it.parentFile?.mkdirs() }
         SQLiteDatabase.openOrCreateDatabase(path, null).use { db ->
             listOf(
@@ -51,7 +54,7 @@ class AppDatabaseMigrationTest {
         }
 
         val database = Room.databaseBuilder(context, AppDatabase::class.java, name)
-            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3)
+            .addMigrations(AppDatabase.MIGRATION_1_2, AppDatabase.MIGRATION_2_3, AppDatabase.MIGRATION_3_4)
             .allowMainThreadQueries()
             .build()
 

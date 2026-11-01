@@ -3,6 +3,7 @@ package com.kheyr.sms.receiver
 import com.kheyr.sms.domain.SpamRule
 import com.kheyr.sms.domain.SpamRuleSet
 import com.kheyr.sms.domain.SpamRuleType
+import com.kheyr.sms.domain.SpamScore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -60,6 +61,26 @@ class SmsReceiveHandlerTest {
         assertEquals(1, harness.notifications)
     }
 
+    @Test fun theCategoryReachesTheStoreForAnOrdinaryInboxMessage() {
+        // Most categorized messages are not spam at all, so a verdict recorded only on the spam
+        // path would leave the category empty for nearly everything that has one.
+        val harness = Harness()
+
+        harness.handle(IncomingSms("20001", "Your code is 123456", 30L, null, null, null))
+
+        assertEquals("otp", harness.inboxScores.single().category)
+    }
+
+    @Test fun theCategoryReachesTheStoreForASpamMessage() {
+        val harness = Harness()
+
+        harness.handle(IncomingSms("+989991234", "winner visit https://bad.example", 10L, 5L, 1, 7))
+
+        val score = harness.spamScores.single()
+        assertEquals("scam", score.category)
+        assertTrue("the spam total is carried through too", score.total >= 70)
+    }
+
     private class Harness(
         knownContacts: Set<String> = emptySet(),
         // false models a thread the user has restored with "Not spam": the store refuses to flag it.
@@ -67,17 +88,21 @@ class SmsReceiveHandlerTest {
     ) {
         val spamMessages = mutableListOf<IncomingSms>()
         val inboxMessages = mutableListOf<IncomingSms>()
+        val spamScores = mutableListOf<SpamScore>()
+        val inboxScores = mutableListOf<SpamScore>()
         var notifications = 0
         var lastNotificationWasUnknownSender = false
         private val handler = SmsReceiveHandler(
             spamRules = SpamRulesProvider { rules },
             contactLookup = SenderContactLookup { it in knownContacts },
-            spamStore = SpamMessageStore { message, _, _ ->
+            spamStore = SpamMessageStore { message, score ->
                 spamMessages += message
+                spamScores += score
                 SpamPersistOutcome(stored(message), treatedAsSpam = treatSpamAsSpam)
             },
-            inboxStore = InboxMessageStore { message ->
+            inboxStore = InboxMessageStore { message, score ->
                 inboxMessages += message
+                inboxScores += score
                 stored(message)
             },
             notifier = IncomingSmsNotifier { _, senderIsContact ->
@@ -101,10 +126,10 @@ class SmsReceiveHandlerTest {
 
             val rules = SpamRuleSet(1, threshold = 70, rules = listOf(
                 SpamRule("premium-prefix", SpamRuleType.NumberPrefix, "+98999", 35),
-                SpamRule("winner", SpamRuleType.MessageKeyword, "winner", 30),
+                SpamRule("winner", SpamRuleType.MessageKeyword, "winner", 30, category = "scam", categoryScore = 45),
                 SpamRule("url", SpamRuleType.UrlDetected, score = 40),
                 SpamRule("unknown", SpamRuleType.SenderNotInContacts, score = 45),
-                SpamRule("otp", SpamRuleType.OtpRegex, "\\b\\d{4,8}\\b", -40),
+                SpamRule("otp", SpamRuleType.OtpRegex, "\\b\\d{4,8}\\b", -40, category = "otp", categoryScore = 40),
             ))
         }
     }

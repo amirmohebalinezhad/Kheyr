@@ -3,7 +3,8 @@ package com.kheyr.sms.receiver
 import com.kheyr.sms.data.SmsRefreshEvents
 import com.kheyr.sms.domain.SpamClassification
 import com.kheyr.sms.domain.SpamRuleSet
-import com.kheyr.sms.domain.SpamScorer
+import com.kheyr.sms.domain.SpamScore
+import com.kheyr.sms.domain.SpamScorerCache
 
 /** Coordinates incoming SMS spam suppression before any notification policy is evaluated. */
 class SmsReceiveHandler(
@@ -16,9 +17,9 @@ class SmsReceiveHandler(
 ) {
     fun handle(message: IncomingSms): IncomingSmsResult {
         val senderIsContact = contactLookup.isKnownContact(message.sender)
-        val score = SpamScorer(spamRules.activeRuleSet()).score(message.sender, message.body, senderIsContact)
+        val score = SpamScorerCache.scorerFor(spamRules.activeRuleSet()).score(message.sender, message.body, senderIsContact)
         return if (score.classification == SpamClassification.Spam) {
-            val outcome = spamStore.persistSpam(message, score.total, score.triggeredRuleIds)
+            val outcome = spamStore.persistSpam(message, score)
             // An open Spam folder is driven by the same refresh events as the inbox, so it needs one
             // here too or newly arrived spam is invisible until the screen is reopened.
             SmsRefreshEvents.notifyThreadChanged(outcome.stored.threadId)
@@ -34,7 +35,7 @@ class SmsReceiveHandler(
                 IncomingSmsResult.NotificationPosted
             }
         } else {
-            val storedMessage = inboxStore.persistInbox(message)
+            val storedMessage = inboxStore.persistInbox(message, score)
             SmsRefreshEvents.notifyThreadChanged(storedMessage.threadId)
             if (shouldNotify(message)) {
                 notifier.show(storedMessage, senderIsContact)
@@ -78,6 +79,12 @@ data class SpamPersistOutcome(val stored: StoredIncomingSms, val treatedAsSpam: 
 
 fun interface SpamRulesProvider { fun activeRuleSet(): SpamRuleSet }
 fun interface SenderContactLookup { fun isKnownContact(sender: String): Boolean }
-fun interface SpamMessageStore { fun persistSpam(message: IncomingSms, score: Int, triggeredRuleIds: List<String>): SpamPersistOutcome }
-fun interface InboxMessageStore { fun persistInbox(message: IncomingSms): StoredIncomingSms }
+/**
+ * Both stores receive the whole [SpamScore] because the category axis has to be persisted for
+ * inbox messages too: most categorized messages - bank alerts, OTPs, delivery notices - are not
+ * spam at all, so recording the verdict only on the spam path would leave the category empty for
+ * nearly everything that has one.
+ */
+fun interface SpamMessageStore { fun persistSpam(message: IncomingSms, score: SpamScore): SpamPersistOutcome }
+fun interface InboxMessageStore { fun persistInbox(message: IncomingSms, score: SpamScore): StoredIncomingSms }
 fun interface IncomingSmsNotifier { fun show(message: StoredIncomingSms, senderIsContact: Boolean) }

@@ -164,7 +164,9 @@ public class SpamRulesController(SpamRuleService spamRules) : ControllerBase
         {
             version = version.Version,
             threshold = version.Threshold,
-            rules = rules.Select(r => new { id = r.Id, type = r.Type, pattern = r.Pattern, score = r.Score, enabled = r.Enabled }),
+            // Every field the device is allowed to see must be listed here: anything omitted is
+            // silently dropped no matter what was published.
+            rules = rules.Select(r => new { id = r.Id, type = r.Type, pattern = r.Pattern, score = r.Score, enabled = r.Enabled, category = r.Category, category_score = r.CategoryScore }),
             created_at = version.CreatedAt.ToUnixTimeSeconds(),
         });
     }

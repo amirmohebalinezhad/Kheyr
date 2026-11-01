@@ -1,5 +1,6 @@
 package com.kheyr.sms.data
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.ForeignKey
 import androidx.room.Index
@@ -29,6 +30,51 @@ data class SmsMessageEntity(
     val status: MessageStatus,
     val read: Boolean,
     val simSlot: Int? = null,
+    /**
+     * Rule-derived category ("financial", "otp", "advertising"...), null until a rule resolves one.
+     *
+     * Per message rather than per thread on purpose: a commercial sender's thread carries delivery
+     * notices and promotions at once, and the thread-level [SyncSpamMetadataEntity] cannot say which
+     * message was which.
+     */
+    val categoryId: String? = null,
+    /**
+     * What the message scored on arrival, kept so a later reclassification can be explained and
+     * compared. Distinct from [SyncSpamMetadataEntity.spamScore], which is a thread-level float.
+     */
+    @ColumnInfo(defaultValue = "0") val spamScore: Int = 0,
+)
+
+/**
+ * A message category, built in or created by the user. Built-in categories are the ones the rule
+ * pack resolves; user categories are created from settings or the assignment sheet.
+ *
+ * [deletedAt] is a tombstone rather than a hard delete so the row can sync as user data.
+ */
+@Entity(tableName = "categories")
+data class CategoryEntity(
+    @PrimaryKey val id: String,
+    val name: String,
+    @ColumnInfo(defaultValue = "0") val isBuiltIn: Boolean = false,
+    val colorKey: String? = null,
+    @ColumnInfo(defaultValue = "0") val sortOrder: Int = 0,
+    val createdAt: Instant,
+    val deletedAt: Instant? = null,
+)
+
+/**
+ * A user's category assignment for one sender, which outranks any rule-derived category.
+ *
+ * [senderKey] must be `PhoneNumberNormalizer.matchKey(address)`, the same keying blocked senders
+ * use: the address on a thread and the address in the PDU are formatted differently far more often
+ * than not, and an exact string match would quietly fail to apply the assignment.
+ */
+@Entity(tableName = "sender_category")
+data class SenderCategoryEntity(
+    @PrimaryKey val senderKey: String,
+    val categoryId: String,
+    val source: String,
+    val assignedAt: Instant,
 )
 
 @Entity(tableName = "thread_state")
