@@ -34,6 +34,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.kheyr.sms.BuildConfig
 import com.kheyr.sms.R
 import com.kheyr.sms.api.ApiConfig
 import com.kheyr.sms.settings.NotificationContentMode
@@ -349,7 +350,7 @@ fun SettingsDetailScreen(
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
-                            text = "Version 0.1.0",
+                            text = "Version ${BuildConfig.VERSION_NAME}",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )

@@ -41,7 +41,12 @@ import kotlinx.coroutines.runBlocking
 import java.time.Instant
 
 class PreferencesSpamRulesProvider(private val preferences: AppPreferences, private val defaults: SpamRuleSet) : SpamRulesProvider {
-    override fun activeRuleSet(): SpamRuleSet = preferences.loadSpamRuleSet(defaults)
+    override fun activeRuleSet(): SpamRuleSet {
+        val cached = preferences.loadSpamRuleSet(defaults)
+        // A bundled pack is a floor, not just a first-launch default: an install that previously
+        // cached the old v1 seed must pick up the richer bundled v2 rules instead of staying on it.
+        return if (cached.version >= defaults.version) cached else defaults
+    }
 }
 
 class RoomIncomingSmsStore(
@@ -306,19 +311,4 @@ class AndroidContactLookup(private val context: Context) : SenderContactLookup {
         val normalizedUri = Uri.withAppendedPath(ContactsContract.PhoneLookup.CONTENT_FILTER_URI, Uri.encode(normalized))
         return context.contentResolver.query(normalizedUri, arrayOf(ContactsContract.PhoneLookup._ID), null, null, null)?.use { it.moveToFirst() } == true
     }
-}
-
-object DefaultSpamRuleSet {
-    val rules = com.kheyr.sms.domain.SpamRuleSet(
-        version = 1,
-        threshold = 70,
-        rules = listOf(
-            com.kheyr.sms.domain.SpamRule("spam-keyword-winner", com.kheyr.sms.domain.SpamRuleType.MessageKeyword, "winner", 35),
-            com.kheyr.sms.domain.SpamRule("spam-keyword-prize", com.kheyr.sms.domain.SpamRuleType.MessageKeyword, "prize", 35),
-            com.kheyr.sms.domain.SpamRule("spam-url", com.kheyr.sms.domain.SpamRuleType.UrlDetected, score = 35),
-            com.kheyr.sms.domain.SpamRule("spam-suspicious-link", com.kheyr.sms.domain.SpamRuleType.SuspiciousLinkPattern, score = 45),
-            com.kheyr.sms.domain.SpamRule("unknown-sender", com.kheyr.sms.domain.SpamRuleType.SenderNotInContacts, score = 25),
-            com.kheyr.sms.domain.SpamRule("otp-code", com.kheyr.sms.domain.SpamRuleType.OtpRegex, "\\b(code|otp)\\b.*\\b\\d{4,8}\\b|\\b\\d{4,8}\\b.*\\b(code|otp)\\b", -50),
-        ),
-    )
 }
